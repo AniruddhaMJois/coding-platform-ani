@@ -39,6 +39,18 @@ npm start
 ```
 
 
+## Running the backend tests
+
+The `/execute` API is covered by Jest + Supertest tests in `server/tests/execute.test.js`. Docker is mocked, so you do not need Docker or the judge images to run them.
+
+```bash
+cd server
+npm install
+npm test
+```
+
+The suite covers passing and failing submissions, compile errors, runtime errors, an empty body, missing or malformed fields, unsupported languages and Docker being unavailable.
+
 ## Developer notes
 
 - Frontend now calls the Docker-backed `/execute` endpoint and shows `compileError`, `stderr`, and non-zero exit statuses prominently.

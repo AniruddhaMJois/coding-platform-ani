@@ -59,6 +59,18 @@ gap: 15px;
 .timer {
   color: yellow;
   font-weight: bold;
+  white-space: nowrap;
+}
+
+.timer-low {
+  color: #ff4d4d;
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  50% {
+    opacity: 0.6;
+  }
 }
 
 .violations {

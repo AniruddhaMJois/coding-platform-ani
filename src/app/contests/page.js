@@ -1,6 +1,9 @@
 import Link from 'next/link';
 const { prisma } = require('@/lib/prisma');
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default async function ContestsPage() {
   const contests = await prisma.contest.findMany({
     include: {

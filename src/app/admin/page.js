@@ -17,8 +17,7 @@ export default function AdminPage() {
   const [sampleOutput, setSampleOutput] = useState('');
   const [constraints, setConstraints] = useState('["1 <= n <= 10^5"]');
   const [testCases, setTestCases] = useState([
-    { input: '', stdin: '', expected: '', isHidden: false },
-    { input: '', stdin: '', expected: '', isHidden: true }
+    { input: '', stdin: '', expected: '', isHidden: false }
   ]);
 
   const fetchProblems = async () => {
@@ -83,6 +82,13 @@ export default function AdminPage() {
       });
 
       if (res.ok) {
+        // Broadcast instant update to all open participant tabs
+        try {
+          const ch = new BroadcastChannel('platform_cms_channel');
+          ch.postMessage({ type: 'CMS_UPDATE', action: 'create', title });
+          ch.close();
+        } catch (e) {}
+
         setShowAddModal(false);
         setTitle('');
         setSlug('');
@@ -100,7 +106,16 @@ export default function AdminPage() {
     if (!confirm('Are you sure you want to delete this problem?')) return;
     try {
       const res = await fetch(`/api/admin/problems?id=${id}`, { method: 'DELETE' });
-      if (res.ok) fetchProblems();
+      if (res.ok) {
+        // Broadcast instant update to all open participant tabs
+        try {
+          const ch = new BroadcastChannel('platform_cms_channel');
+          ch.postMessage({ type: 'CMS_UPDATE', action: 'delete', id });
+          ch.close();
+        } catch (e) {}
+
+        fetchProblems();
+      }
     } catch (err) {
       alert(`Error: ${err.message}`);
     }
@@ -277,7 +292,6 @@ export default function AdminPage() {
                         placeholder="Expected Output" 
                         value={tc.expected} 
                         onChange={(e) => handleTestCaseChange(idx, 'expected', e.target.value)}
-                        required
                         style={{ flex: 1.5, padding: '0.35rem', background: '#1e293b', border: '1px solid #334155', color: '#fff', borderRadius: '4px' }}
                       />
                       <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', cursor: 'pointer' }}>

@@ -1,0 +1,71 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id          Int          @id @default(autoincrement())
+  name        String
+  email       String       @unique
+  role        String       @default("participant") // "admin" | "participant"
+  submissions Submission[]
+  createdAt   DateTime     @default(now())
+}
+
+model Contest {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String
+  status      String    @default("active") // "active" | "upcoming" | "ended"
+  problems    Problem[]
+  createdAt   DateTime  @default(now())
+}
+
+model Problem {
+  id           Int          @id @default(autoincrement())
+  slug         String       @unique
+  title        String
+  description  String
+  difficulty   String       @default("Easy")
+  constraints  String       // JSON array of strings
+  sampleInput  String
+  sampleOutput String
+  templates    String       // JSON map of language -> code template
+  contestId    Int?
+  contest      Contest?     @relation(fields: [contestId], references: [id])
+  testCases    TestCase[]
+  submissions  Submission[]
+  createdAt    DateTime     @default(now())
+}
+
+model TestCase {
+  id        Int      @id @default(autoincrement())
+  problemId Int
+  problem   Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  input     String?  // formatted input (e.g. nums = [2,7,11,15], target = 9)
+  stdin     String?  // raw stdin input for execution
+  expected  String   // expected stdout or returned value
+  isHidden  Boolean  @default(false) // false = sample/public, true = hidden evaluation case
+  createdAt DateTime @default(now())
+}
+
+model Submission {
+  id          Int      @id @default(autoincrement())
+  problemId   Int
+  problem     Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  userId      Int?
+  user        User?    @relation(fields: [userId], references: [id])
+  language    String
+  code        String
+  score       Int      @default(0) // 0-100%
+  status      String   @default("Pending") // "Accepted" | "Wrong Answer" | "Runtime Error" | "Compilation Error"
+  passedTests Int      @default(0)
+  totalTests  Int      @default(0)
+  output      String?
+  timeMs      Int?
+  createdAt   DateTime @default(now())
+}

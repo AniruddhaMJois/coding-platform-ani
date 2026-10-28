@@ -17,6 +17,9 @@ export default function ProblemEditorPage({ params }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [running, setRunning] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
   const [timeLeft, setTimeLeft] = useState(3600); // 1 hour
 
   // 1. Fetch problem and problem list
@@ -30,12 +33,18 @@ export default function ProblemEditorPage({ params }) {
           const current = data.problems.find(p => p.slug === slug) || data.problems[0];
           setProblem(current);
 
-          // Restore saved draft or default template
-          const savedCode = localStorage.getItem(`draft_${current.slug}_${language}`);
-          if (savedCode) {
-            setCode(savedCode);
+          // Check if user has an explicitly saved draft in DB for this problem & language
+          const draftRes = await fetch(`/api/drafts?problemId=${current.id}&language=${language}`);
+          const draftData = await draftRes.json();
+
+          if (draftData.draft?.code) {
+            setCode(draftData.draft.code);
+            setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
+            setHasUnsavedChanges(false);
           } else {
             setCode(current.templates[language] || '// Write your solution here');
+            setLastSavedTime(null);
+            setHasUnsavedChanges(false);
           }
         }
       } catch (e) {
@@ -47,31 +56,68 @@ export default function ProblemEditorPage({ params }) {
     loadData();
   }, [slug]);
 
-  // 2. Language switch handler with local draft persistence
-  const handleLanguageChange = (newLang) => {
-    // Save current draft
-    if (problem) {
-      localStorage.setItem(`draft_${problem.slug}_${language}`, code);
-    }
+  // 2. Language switch handler (loads explicitly saved draft or template)
+  const handleLanguageChange = async (newLang) => {
     setLanguage(newLang);
-    // Load existing draft or template
-    const saved = localStorage.getItem(`draft_${problem?.slug}_${newLang}`);
-    if (saved) {
-      setCode(saved);
-    } else if (problem?.templates?.[newLang]) {
-      setCode(problem.templates[newLang]);
+    if (!problem) return;
+
+    try {
+      const draftRes = await fetch(`/api/drafts?problemId=${problem.id}&language=${newLang}`);
+      const draftData = await draftRes.json();
+
+      if (draftData.draft?.code) {
+        setCode(draftData.draft.code);
+        setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
+        setHasUnsavedChanges(false);
+      } else {
+        setCode(problem.templates?.[newLang] || '// Write your solution here');
+        setLastSavedTime(null);
+        setHasUnsavedChanges(false);
+      }
+    } catch (e) {
+      setCode(problem.templates?.[newLang] || '// Write your solution here');
     }
   };
 
-  // 3. Code change handler
+  // 3. Code change handler - flags unsaved changes
   const handleCodeChange = (newCode) => {
     setCode(newCode || '');
-    if (problem) {
-      localStorage.setItem(`draft_${problem.slug}_${language}`, newCode || '');
+    setHasUnsavedChanges(true);
+  };
+
+  // 4. Explicit Save Code Handler (Saves to Database only on click)
+  const handleSaveCode = async () => {
+    if (!problem) return;
+    setSaving(true);
+
+    try {
+      const res = await fetch('/api/drafts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problemId: problem.id,
+          language,
+          code
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setHasUnsavedChanges(false);
+        const timeStr = new Date(data.savedAt).toLocaleTimeString();
+        setLastSavedTime(timeStr);
+        setOutput(`Code draft saved successfully at ${timeStr}`);
+      } else {
+        alert(`Failed to save draft: ${data.error}`);
+      }
+    } catch (err) {
+      alert(`Save error: ${err.message}`);
+    } finally {
+      setSaving(false);
     }
   };
 
-  // 4. Timer countdown
+  // 5. Timer countdown
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
@@ -85,7 +131,7 @@ export default function ProblemEditorPage({ params }) {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // 5. Run Code (Public sample test cases only)
+  // 6. Run Code (Public sample test cases only)
   const handleRunCode = async () => {
     if (!problem) return;
     setRunning(true);
@@ -120,7 +166,7 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 6. Submit Code (Full hidden test evaluation)
+  // 7. Submit Code (Full hidden test evaluation)
   const handleSubmitCode = async () => {
     if (!problem) return;
     setSubmitting(true);
@@ -238,6 +284,34 @@ export default function ProblemEditorPage({ params }) {
               <option value="cpp">C++ (G++)</option>
               <option value="java">Java (JDK)</option>
             </select>
+
+            {/* Explicit Save Button & Status */}
+            <button 
+              onClick={handleSaveCode}
+              disabled={saving}
+              className="nav-btn"
+              style={{
+                borderColor: hasUnsavedChanges ? '#f59e0b' : '#334155',
+                color: hasUnsavedChanges ? '#fbbf24' : '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                fontSize: '0.8rem',
+                padding: '0.35rem 0.65rem'
+              }}
+            >
+              💾 {saving ? 'Saving...' : 'Save Draft'}
+            </button>
+
+            {hasUnsavedChanges ? (
+              <span style={{ fontSize: '0.75rem', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                ● Unsaved
+              </span>
+            ) : lastSavedTime ? (
+              <span style={{ fontSize: '0.75rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                ✓ Saved ({lastSavedTime})
+              </span>
+            ) : null}
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>

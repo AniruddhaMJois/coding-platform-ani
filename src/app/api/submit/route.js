@@ -90,8 +90,8 @@ export async function POST(request) {
       }
     });
 
-    // If accepted, also ensure draft reflects the successful code
-    if (status === 'Accepted' && effectiveUserId) {
+    // Persist or update draft with the latest code attempt
+    if (effectiveUserId) {
       try {
         const existingDraft = await prisma.codeDraft.findFirst({
           where: { problemId: problem.id, language, userId: effectiveUserId }

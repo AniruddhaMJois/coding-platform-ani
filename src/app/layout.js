@@ -102,7 +102,7 @@ export default function RootLayout({ children }) {
               <>
                 <Link href="/contests" className="nav-btn">Contests</Link>
                 <Link href="/problems" className="nav-btn">Problems</Link>
-                <Link href="/submissions" className="nav-btn">My Submissions</Link>
+                <Link href="/submissions" className="nav-btn">Submissions & Drafts</Link>
                 {currentUser.role === 'admin' && (
                   <Link href="/admin" className="nav-btn" style={{ borderColor: '#6366f1', color: '#a5b4fc' }}>
                     🛡️ Admin CMS

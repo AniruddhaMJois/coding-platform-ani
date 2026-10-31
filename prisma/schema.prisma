@@ -56,6 +56,8 @@ model TestCase {
   expected  String   // expected stdout or returned value
   isHidden  Boolean  @default(false) // false = sample/public, true = hidden evaluation case
   createdAt DateTime @default(now())
+
+  @@index([problemId, isHidden])
 }
 
 model Submission {
@@ -73,6 +75,10 @@ model Submission {
   output      String?
   timeMs      Int?
   createdAt   DateTime @default(now())
+
+  @@index([userId, status])
+  @@index([problemId, userId, status])
+  @@index([problemId])
 }
 
 model CodeDraft {
@@ -87,4 +93,6 @@ model CodeDraft {
   createdAt DateTime @default(now())
 
   @@unique([problemId, userId, language])
+  @@index([userId])
+  @@index([problemId, userId])
 }

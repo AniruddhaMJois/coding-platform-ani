@@ -25,24 +25,47 @@ export default function ProblemsPage() {
   useEffect(() => {
     fetchProblems();
 
-    // Real-time synchronization via BroadcastChannel
+    // 1. Listen via Server-Sent Events (cross-browser / cross-device)
+    let es;
+    try {
+      es = new EventSource('/api/events');
+      es.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'TESTCASE_UPLOADED') {
+            fetchProblems();
+            setLiveNotification(`⚡ Instructor uploaded test cases for "${payload.title || 'a problem'}". Catalog updated.`);
+            setTimeout(() => setLiveNotification(null), 5000);
+          } else if (payload.type === 'TESTCASE_DELETED') {
+            fetchProblems();
+          } else if (payload.type === 'CMS_UPDATE') {
+            fetchProblems();
+            setLiveNotification(`⚡ Contest problem list updated by instructor.`);
+            setTimeout(() => setLiveNotification(null), 5000);
+          }
+        } catch (err) {}
+      };
+    } catch (e) {}
+
+    // 2. Real-time synchronization via BroadcastChannel (same-browser instant)
     let channel;
     try {
       channel = new BroadcastChannel('platform_cms_channel');
       channel.onmessage = (event) => {
-        if (event.data?.type === 'CMS_UPDATE') {
+        if (event.data?.type === 'CMS_UPDATE' || event.data?.type === 'TESTCASE_UPLOADED' || event.data?.type === 'TESTCASE_DELETED') {
           fetchProblems();
-          setLiveNotification(`New updates from instructor: ${event.data.title || 'Contest problem list refreshed'}`);
+          setLiveNotification(`⚡ New updates from instructor: ${event.data.title || event.data.message || 'Problems refreshed'}`);
           setTimeout(() => setLiveNotification(null), 5000);
         }
       };
     } catch (e) {}
 
-    // Polling fallback every 5 seconds to ensure instant reflection
-    const interval = setInterval(fetchProblems, 5000);
+    // 3. Polling fallback every 4 seconds to guarantee consistency
+    const interval = setInterval(fetchProblems, 4000);
 
     return () => {
       clearInterval(interval);
+      if (es) es.close();
       if (channel) channel.close();
     };
   }, []);

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Editor from '@monaco-editor/react';
 
@@ -21,12 +21,17 @@ export default function ProblemEditorPage({ params }) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState(null);
   const [timeLeft, setTimeLeft] = useState(3600); // 1 hour
+  const [liveNotice, setLiveNotice] = useState(null);
 
-  // 1. Fetch problem and problem list
+  // Keep a ref to current language and problem id for background sync
+  const currentLangRef = useRef(language);
+  currentLangRef.current = language;
+
+  // 1. Initial Load
   useEffect(() => {
     async function loadData() {
       try {
-        const res = await fetch('/api/problems');
+        const res = await fetch('/api/problems', { cache: 'no-store' });
         const data = await res.json();
         if (data.problems) {
           setAllProblems(data.problems);
@@ -34,7 +39,7 @@ export default function ProblemEditorPage({ params }) {
           setProblem(current);
 
           // Check if user has an explicitly saved draft in DB for this problem & language
-          const draftRes = await fetch(`/api/drafts?problemId=${current.id}&language=${language}`);
+          const draftRes = await fetch(`/api/drafts?problemId=${current.id}&language=${currentLangRef.current}`);
           const draftData = await draftRes.json();
 
           if (draftData.draft?.code) {
@@ -42,7 +47,7 @@ export default function ProblemEditorPage({ params }) {
             setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
             setHasUnsavedChanges(false);
           } else {
-            setCode(current.templates[language] || '// Write your solution here');
+            setCode(current.templates[currentLangRef.current] || '// Write your solution here');
             setLastSavedTime(null);
             setHasUnsavedChanges(false);
           }
@@ -56,7 +61,79 @@ export default function ProblemEditorPage({ params }) {
     loadData();
   }, [slug]);
 
-  // 2. Language switch handler (loads explicitly saved draft or template)
+  // 2. Real-time background sync for test cases and problem data
+  const refreshProblemData = async (noticeText = null) => {
+    try {
+      const res = await fetch(`/api/problems?slug=${slug}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.problem) {
+        setProblem(prev => {
+          if (!prev) return data.problem;
+          return {
+            ...prev,
+            ...data.problem,
+            testCases: data.problem.testCases
+          };
+        });
+
+        if (noticeText) {
+          setLiveNotice(noticeText);
+          setTimeout(() => setLiveNotice(null), 6000);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to sync problem data:', e);
+    }
+  };
+
+  useEffect(() => {
+    // A. Listen via Server-Sent Events (cross-device & cross-browser real-time)
+    let eventSource;
+    try {
+      eventSource = new EventSource('/api/events');
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === 'TESTCASE_UPLOADED' || payload.type === 'TESTCASE_DELETED') {
+            if (payload.slug === slug || !payload.slug) {
+              const msg = payload.type === 'TESTCASE_UPLOADED'
+                ? `⚡ Instructor uploaded ${payload.count || 1} new test case(s)! Live test suite updated.`
+                : `⚡ Test cases updated by instructor!`;
+              refreshProblemData(msg);
+            }
+          } else if (payload.type === 'CMS_UPDATE') {
+            refreshProblemData('⚡ Problem refreshed by instructor.');
+          }
+        } catch (err) {}
+      };
+    } catch (e) {}
+
+    // B. Listen via BroadcastChannel (same-browser instant cross-tab sync)
+    let bc;
+    try {
+      bc = new BroadcastChannel('platform_cms_channel');
+      bc.onmessage = (event) => {
+        if (event.data?.type === 'TESTCASE_UPLOADED' || event.data?.type === 'TESTCASE_DELETED' || event.data?.type === 'CMS_UPDATE') {
+          if (event.data.slug === slug || !event.data.slug) {
+            refreshProblemData(event.data.message || '⚡ Test case update received from instructor!');
+          }
+        }
+      };
+    } catch (e) {}
+
+    // C. Lightweight fallback polling every 3.5 seconds
+    const interval = setInterval(() => {
+      refreshProblemData(null);
+    }, 3500);
+
+    return () => {
+      if (eventSource) eventSource.close();
+      if (bc) bc.close();
+      clearInterval(interval);
+    };
+  }, [slug]);
+
+  // 3. Language switch handler (loads explicitly saved draft or template)
   const handleLanguageChange = async (newLang) => {
     setLanguage(newLang);
     if (!problem) return;
@@ -79,13 +156,13 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 3. Code change handler - flags unsaved changes
+  // 4. Code change handler - flags unsaved changes
   const handleCodeChange = (newCode) => {
     setCode(newCode || '');
     setHasUnsavedChanges(true);
   };
 
-  // 4. Explicit Save Code Handler (Saves to Database only on click)
+  // 5. Explicit Save Code Handler (Saves to Database only on click)
   const handleSaveCode = async () => {
     if (!problem) return;
     setSaving(true);
@@ -117,7 +194,7 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 5. Timer countdown
+  // 6. Timer countdown
   useEffect(() => {
     const timer = setInterval(() => {
       setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
@@ -131,7 +208,7 @@ export default function ProblemEditorPage({ params }) {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // 6. Run Code (Public sample test cases only)
+  // 7. Run Code (Public sample test cases only)
   const handleRunCode = async () => {
     if (!problem) return;
     setRunning(true);
@@ -166,7 +243,7 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 7. Submit Code (Full hidden test evaluation)
+  // 8. Submit Code (Full hidden test evaluation)
   const handleSubmitCode = async () => {
     if (!problem) return;
     setSubmitting(true);
@@ -215,15 +292,43 @@ export default function ProblemEditorPage({ params }) {
 
   return (
     <div className="editor-layout">
-      {/* Left Pane: Problem Description */}
+      {/* Left Pane: Problem Description & Live Test Cases */}
       <div className="problem-panel">
+        {/* Real-time Notification Banner */}
+        {liveNotice && (
+          <div 
+            style={{ 
+              background: 'linear-gradient(90deg, #1e1b4b, #312e81)', 
+              border: '1px solid #818cf8', 
+              color: '#c7d2fe', 
+              padding: '0.65rem 1rem', 
+              borderRadius: '8px', 
+              marginBottom: '1rem',
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
+              animation: 'pulse 2s infinite'
+            }}
+          >
+            <span>{liveNotice}</span>
+          </div>
+        )}
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             Problem {currentIndex + 1} of {allProblems.length}
           </span>
-          <span className={`badge ${problem.difficulty === 'Easy' ? 'badge-easy' : 'badge-medium'}`}>
-            {problem.difficulty}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.75rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
+              Live Sync
+            </span>
+            <span className={`badge ${problem.difficulty === 'Easy' ? 'badge-easy' : 'badge-medium'}`}>
+              {problem.difficulty}
+            </span>
+          </div>
         </div>
 
         <h1 style={{ fontSize: '1.75rem', marginBottom: '1rem', color: '#fff' }}>
@@ -250,6 +355,48 @@ export default function ProblemEditorPage({ params }) {
         <pre style={{ background: '#111827', padding: '0.75rem', borderRadius: '6px', marginBottom: '1.5rem', color: '#4ade80' }}>
           {problem.sampleOutput}
         </pre>
+
+        {/* Public Sample Test Cases with Instant Live Sync */}
+        <div style={{ marginTop: '1.5rem', borderTop: '1px solid #1f293d', paddingTop: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h3 style={{ fontSize: '1.05rem', margin: 0, color: '#fff' }}>
+              Public Test Cases ({problem.testCases?.length || 0})
+            </h3>
+            <span style={{ fontSize: '0.75rem', color: '#38bdf8' }}>
+              Reflects updates instantly
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+            {problem.testCases && problem.testCases.length > 0 ? (
+              problem.testCases.map((tc, idx) => (
+                <div 
+                  key={tc.id || idx} 
+                  style={{ 
+                    background: '#111827', 
+                    borderRadius: '6px', 
+                    padding: '0.75rem', 
+                    border: '1px solid #1f2937' 
+                  }}
+                >
+                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#818cf8', marginBottom: '0.25rem' }}>
+                    Case #{idx + 1}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '0.2rem' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Input:</span> <code>{tc.input || tc.stdin}</code>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#4ade80' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Expected:</span> <code>{tc.expected}</code>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                No public test cases uploaded yet.
+              </p>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Right Pane: Code Editor & Execution Console */}

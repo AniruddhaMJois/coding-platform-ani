@@ -6,7 +6,12 @@ export const revalidate = 0;
 
 export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const slug = searchParams.get('slug');
+    const where = slug ? { slug } : {};
+
     const problems = await prisma.problem.findMany({
+      where,
       select: {
         id: true,
         slug: true,
@@ -25,7 +30,8 @@ export async function GET(request) {
             stdin: true,
             expected: true,
             isHidden: true
-          }
+          },
+          orderBy: { id: 'asc' }
         }
       },
       orderBy: { id: 'asc' }
@@ -36,6 +42,13 @@ export async function GET(request) {
       constraints: JSON.parse(p.constraints || '[]'),
       templates: JSON.parse(p.templates || '{}')
     }));
+
+    if (slug) {
+      if (formatted.length === 0) {
+        return NextResponse.json({ error: 'Problem not found' }, { status: 404 });
+      }
+      return NextResponse.json({ problem: formatted[0] });
+    }
 
     return NextResponse.json(
       { problems: formatted },

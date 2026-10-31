@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
 const { prisma } = require('@/lib/prisma');
+import { broadcastEvent } from '@/lib/realtime';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function GET() {
   try {
@@ -55,6 +59,15 @@ export async function POST(request) {
       }
     });
 
+    broadcastEvent({
+      type: 'CMS_UPDATE',
+      action: 'create',
+      problemId: problem.id,
+      slug: problem.slug,
+      title: problem.title,
+      timestamp: Date.now()
+    });
+
     return NextResponse.json({ ok: true, problem });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -67,8 +80,21 @@ export async function DELETE(request) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
 
+    const problem = await prisma.problem.findUnique({
+      where: { id: Number(id) }
+    });
+
     await prisma.problem.delete({
       where: { id: Number(id) }
+    });
+
+    broadcastEvent({
+      type: 'CMS_UPDATE',
+      action: 'delete',
+      problemId: Number(id),
+      slug: problem?.slug,
+      title: problem?.title,
+      timestamp: Date.now()
     });
 
     return NextResponse.json({ ok: true });

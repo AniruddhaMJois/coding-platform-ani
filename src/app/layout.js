@@ -11,10 +11,27 @@ export default function RootLayout({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
 
   const checkUser = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('platform_user');
+        if (cached) setCurrentUser(JSON.parse(cached));
+      } catch (e) {}
+    }
+
     try {
       const res = await fetch('/api/auth/me');
       const data = await res.json();
-      setCurrentUser(data.user || null);
+      if (data.user) {
+        setCurrentUser(data.user);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('platform_user', JSON.stringify(data.user));
+        }
+      } else {
+        setCurrentUser(null);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('platform_user');
+        }
+      }
     } catch (e) {
       setCurrentUser(null);
     }
@@ -23,12 +40,13 @@ export default function RootLayout({ children }) {
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      setCurrentUser(null);
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('platform_user');
-        window.location.href = '/login';
-      }
     } catch (e) {}
+    setCurrentUser(null);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('platform_user');
+      window.dispatchEvent(new Event('auth_changed'));
+      window.location.href = '/login';
+    }
   };
 
   useEffect(() => {
@@ -140,16 +158,40 @@ export default function RootLayout({ children }) {
             )}
 
             {currentUser ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', color: '#38bdf8', background: '#0f172a', padding: '0.3rem 0.6rem', borderRadius: '4px', border: '1px solid #1e293b' }}>
-                  {currentUser.role === 'admin' ? '🛡️' : '👤'} {currentUser.name}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginLeft: '0.5rem' }}>
+                <span style={{ 
+                  fontSize: '0.82rem', 
+                  color: '#38bdf8', 
+                  background: '#0f172a', 
+                  padding: '0.35rem 0.65rem', 
+                  borderRadius: '6px', 
+                  border: '1px solid #1e293b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.35rem'
+                }}>
+                  {currentUser.role === 'admin' ? '🛡️' : '👤'} 
+                  <strong>{currentUser.name || currentUser.username}</strong>
+                  <span style={{ color: '#64748b', fontSize: '0.75rem' }}>({currentUser.role})</span>
                 </span>
                 <button 
                   onClick={handleLogout} 
                   className="nav-btn"
-                  style={{ borderColor: '#ef4444', color: '#f87171', padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                  title="Sign out of your account"
+                  style={{ 
+                    borderColor: '#ef4444', 
+                    color: '#f87171', 
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    padding: '0.35rem 0.75rem', 
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.3rem'
+                  }}
                 >
-                  Logout
+                  🚪 Logout
                 </button>
               </div>
             ) : (

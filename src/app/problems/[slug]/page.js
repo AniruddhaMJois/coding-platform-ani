@@ -756,6 +756,30 @@ export default function ProblemEditorPage({ params }) {
             >
               {submitting ? 'Submitting...' : 'Submit'}
             </button>
+
+            <button 
+              onClick={async () => {
+                if (confirm('Are you sure you want to log out of the assessment? Any unsaved changes will be lost.')) {
+                  try {
+                    await fetch('/api/auth/logout', { method: 'POST' });
+                  } catch (e) {}
+                  localStorage.removeItem('platform_user');
+                  window.dispatchEvent(new Event('auth_changed'));
+                  window.location.href = '/login';
+                }
+              }}
+              className="nav-btn"
+              title="Logout of contest assessment"
+              style={{
+                borderColor: '#ef4444',
+                color: '#f87171',
+                background: 'rgba(239, 68, 68, 0.1)',
+                fontSize: '0.8rem',
+                padding: '0.35rem 0.65rem'
+              }}
+            >
+              🚪 Logout
+            </button>
           </div>
         </div>
 

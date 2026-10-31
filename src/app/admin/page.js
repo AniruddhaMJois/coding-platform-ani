@@ -344,9 +344,33 @@ export default function AdminPage() {
             Add problems and upload public/hidden test cases with instant real-time sync to all participant portals.
           </p>
         </div>
-        <button onClick={() => setShowAddModal(true)} className="nav-btn primary">
-          + Add New Problem
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button onClick={() => setShowAddModal(true)} className="nav-btn primary">
+            + Add New Problem
+          </button>
+          <button 
+            onClick={async () => {
+              try {
+                await fetch('/api/auth/logout', { method: 'POST' });
+              } catch (e) {}
+              localStorage.removeItem('platform_user');
+              window.dispatchEvent(new Event('auth_changed'));
+              window.location.href = '/login';
+            }} 
+            className="nav-btn" 
+            style={{ 
+              borderColor: '#ef4444', 
+              color: '#f87171', 
+              background: 'rgba(239, 68, 68, 0.1)',
+              fontWeight: 600,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem'
+            }}
+          >
+            🚪 Logout
+          </button>
+        </div>
       </div>
 
       {loading ? (

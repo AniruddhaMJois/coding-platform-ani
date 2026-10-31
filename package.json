@@ -1,37 +1,26 @@
 {
-  "name": "quiz-platform",
-  "version": "0.1.0",
+  "name": "coding-platform",
+  "version": "2.0.0",
   "private": true,
-  "dependencies": {
-    "codemirror": "^5.65.20",
-    "devtools-detect": "^4.0.2",
-    "react": "^16.8.6",
-    "react-codemirror2": "^9.0.1",
-    "react-dom": "^16.8.6",
-    "react-scripts": "3.0.1"
-  },
   "scripts": {
-    "start": "cross-env NODE_OPTIONS=--openssl-legacy-provider react-scripts start",
-    "build": "cross-env NODE_OPTIONS=--openssl-legacy-provider react-scripts build",
-    "test": "cross-env NODE_OPTIONS=--openssl-legacy-provider react-scripts test",
-    "eject": "react-scripts eject"
+    "dev": "next dev -p 3000",
+    "build": "prisma generate && next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "node prisma/seed.js",
+    "setup": "npm run prisma:generate && npm run prisma:push && npm run prisma:seed"
   },
-  "eslintConfig": {
-    "extends": "react-app"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+  "dependencies": {
+    "@monaco-editor/react": "^4.6.0",
+    "@prisma/client": "^5.21.1",
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3"
+    "prisma": "^5.21.1",
+    "puppeteer-core": "^24.43.1"
   }
 }

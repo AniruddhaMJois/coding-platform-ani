@@ -1,126 +1,233 @@
-# coding-platform
+# CodeJudge — Next-Generation Assessment Platform
 
-## About this project
+An immersive, assessment-first coding evaluation and contest platform built with **Next.js 14 (App Router)**, **Monaco Editor**, **Prisma ORM**, and **Supabase (PostgreSQL)**, featuring decoupled cloud sandboxed execution and real-time proctoring.
 
-coding-platform is an immersive, assessment-first coding environment built for learning, interviews, and secure timed evaluations. It blends a friendly editor experience with strict integrity controls so instructors and contest hosts can focus on evaluating skill — not chasing down accidental shortcuts.
+---
 
-Key ideas:
-- Immersive assessments: during exam or contest mode the UI is intentionally locked down — copying and pasting is restricted, right-click/context menus and developer tools are disabled, and focus is maintained to discourage tab-switching and external lookups.
-- Fairness by design: the platform records audit logs and enforces resource limits and per-job isolation so every submission runs in the same, reproducible environment.
-- Fast feedback: testcases run inside lightweight language sandboxes and return rich structured results . so learners see useful, actionable feedback immediately.
-- Multi-language and function-first: supports Python, Java, Node.js, C and C++ and includes helpers to accept function-only submissions and wrap them safely for execution.
+## 🏛️ Architecture: Why the Previous Architecture Failed
 
-This project aims to be practical for instructors and delightful for learners — combining robust sandboxing with a clean, distraction-minimizing UX.
+The legacy implementation used a two-tier architecture consisting of a Create React App (CRA) frontend on port 3000 and an Express backend on port 3001 that spawned local Docker containers via `docker run`.
 
-## Quick start (local development)
+### Why the Legacy Architecture Failed:
 
-### Prerequisites
+1. **Host-Dependent Local Docker Requirement**:
+   * The backend required Docker Desktop to be actively running on the host machine. If Docker was not installed or the daemon was inactive, the backend crashed immediately with:
+     ```
+     Error: spawn docker ENOENT
+     ```
+   * It required manual compilation of 5 distinct language images (`docker build -t coding-judge-python judge/images/python`, etc.), creating massive friction for setup and maintenance.
 
-- **Git**
-- **Node.js and npm** (tested with Node.js v24.12.0, npm 11.6.2)
-- **Docker**, installed and **running**. The backend runs submitted code inside Docker containers, so code execution fails without it.
-  - On Windows, install [Docker Desktop](https://www.docker.com/products/docker-desktop/) with the WSL 2 backend (`wsl --install` in an admin PowerShell, then restart).
-  - Check it works with `docker info`.
+2. **Physically Incompatible with Vercel and Serverless Hosting**:
+   * **Vercel executes code inside ephemeral serverless micro-functions (AWS Lambda / Firecracker micro-VMs)**.
+   * Serverless runtimes are strictly sandboxed: **no background Docker daemon (`dockerd`)**, **no root access**, **no access to `/var/run/docker.sock`**, and nested virtualization (Docker-in-Docker) is completely prohibited.
+   * Vercel serverless functions have a 10–15s execution timeout and a read-only filesystem (except a 512MB `/tmp`). Pulling or building multi-gigabyte Docker images inside a serverless lambda is fundamentally impossible.
+   * As a result, the old architecture **could never be deployed to Vercel on any plan (Free or Paid)**.
 
-> **Windows users:** run `git config --global core.autocrlf input` **before cloning**. Otherwise Git converts the shell scripts in `judge/` to CRLF line endings, which breaks them inside the Linux containers (see Troubleshooting).
+3. **Single-Host Resource Saturation**:
+   * Running `docker run` directly on the host server meant every participant submission consumed host CPU cores and memory. Under concurrent assessment conditions, multiple submissions saturated the server, causing timeouts and host crashes.
 
-### 1. Clone the repository
+4. **Cross-Platform CRLF / Line-Ending Failures**:
+   * On Windows machines, Git auto-converted line endings to CRLF, breaking the internal Linux bash execution scripts inside containers (`/bin/sh: 1: /usr/local/bin/compile: not found`).
 
-```bash
-git clone https://github.com/osl-vvce/coding-platform.git
-cd coding-platform
+5. **Security & State Leaks**:
+   * The old architecture lacked persistent database user isolation and server-side test case masking. Test cases were often returned unmasked to the frontend, allowing participants to inspect hidden test inputs in browser developer tools.
+
+---
+
+## 🚀 The Modern Architecture
+
+To solve these limitations, the platform was re-architected into a **unified, serverless-ready Next.js full-stack system**:
+
+```
+[ Participant / Admin Browser ]
+              │
+              ▼ (HTTPS)
+┌─────────────────────────────────────────────────────────────┐
+│          Next.js 14 Full-Stack Layer (Vercel)               │
+│                                                             │
+│  ├── Edge Middleware (src/middleware.js)                    │
+│  │   └── Blocks unauthenticated access to all features      │
+│  ├── Pages (App Router: /login, /problems, /admin)          │
+│  │   └── Dynamic UI visibility based on user session        │
+│  └── Serverless API Handlers (/api/run, /api/submit)        │
+│      ├── Authenticates session cookies                      │
+│      ├── Queries Supabase via Prisma ORM                    │
+│      └── Sanitizes & masks hidden evaluation cases          │
+└──────────────┬──────────────────────────────┬───────────────┘
+               │                              │
+     (Outbound HTTPS JSON)            (Connection Pooler)
+               │                              │
+               ▼                              ▼
+┌──────────────────────────────┐ ┌────────────────────────────┐
+│ Cloud Execution Sandbox      │ │ Supabase Cloud Database    │
+│ (Judge0 CE / Remote Cluster) │ │ (PostgreSQL + Prisma)      │
+│                              │ │                            │
+│ • Containerized Compilers    │ │ • Isolated User Drafts     │
+│ • Python, C, C++, Java, JS   │ │ • Hidden & Public Tests    │
+│ • Zero host dependencies     │ │ • Submission Audit History │
+│ • 100% OS & Vercel-ready     │ │ • User Credentials & Roles │
+└──────────────────────────────┘ └────────────────────────────┘
 ```
 
-### 2. Build the judge images
+### Key Architectural Pillars:
 
-Run these from the project root. Each language needs its own image; build only the ones you need.
+1. **Decoupled Cloud Sandbox Execution (Judge0 CE)**:
+   * Execution is offloaded to containerized cloud sandboxes over secure REST APIs.
+   * **Zero Host Dependencies**: Requires **no Docker**, **no local compilers**, and works uniformly across Windows, macOS, Linux, and Vercel Serverless Functions.
+   * Automatic native compiler fallback is preserved for offline development.
 
+2. **Persistent Cloud Database (Supabase + Prisma)**:
+   * **User-Scoped Code Drafts**: Uniquely indexed by `(problemId, userId, language)` with a 64KB safety limit and deduplicated writes (`upsert`) to prevent database bloat.
+   * **User Isolation**: Participant 1 and Participant 2 maintain separate drafts and submission histories with zero data bleed.
+
+3. **Strict Hidden Test Case Protection**:
+   * **Database Level**: Public problem APIs strictly query `where: { isHidden: false }`. Hidden evaluation cases never appear in the client network payload.
+   * **Execution Level**: During "Submit", hidden cases are executed server-side.
+   * **Exfiltration Defense**: All outputs (`input`, `expected`, `stdout`) for hidden test cases are strictly sanitized to `null` before sending responses back to the browser. Malicious attempts to dump inputs via `print(sys.stdin.read())` are completely neutralized.
+
+4. **Global Edge Authentication Middleware (`src/middleware.js`)**:
+   * All platform features (Contests, Problems, Editor, Submissions, Admin CMS) are **completely locked behind authentication**.
+   * Unauthenticated visitors are immediately redirected (`307`) to `/login`.
+   * Unauthenticated API calls return `401 Unauthorized`.
+   * Non-admin participants attempting to access `/admin` or `/api/admin/*` are blocked with `403 Forbidden`.
+
+5. **Comprehensive Proctoring & Anti-Cheat**:
+   * **Zero Pre-existing Code**: Editor opens completely empty (`''`) unless an explicit saved draft exists.
+   * **Copy & Paste Strictly Blocked**: Context menus disabled, clipboard events (`paste`, `copy`, `cut`) intercepted, keyboard shortcuts (`Ctrl+C`, `Ctrl+V`, `Cmd+C`, `Cmd+V`, `Ctrl+X`) blocked with live warning toasts.
+   * **3-Strike Tab Switch Detection**: Document visibility loss triggers persistent violation warnings. The 3rd strike locks the editor and auto-submits the assessment.
+   * **Active Session Countdown Timer**: Counts down exclusively while the participant is engaged in the problem editor (never depletes in the background).
+   * **One-Time Problem Solving Lock**: Once a problem is evaluated as `Accepted` (100% score), it is permanently locked for that participant (`Solved ✓`), preventing re-attempts while other participants maintain an isolated fresh state.
+   * **Unified Submissions & In-Progress Drafts (`/submissions`)**: Displays evaluated submissions alongside active in-progress drafts, complete with status tags (`Accepted`, `In-Progress Draft`, `Wrong Answer`, `Time Limit Exceeded`), a modal code inspector, and direct `Continue Solving →` buttons.
+
+---
+
+## 📚 Seeded Problems (Simple & Accessible)
+
+The platform is pre-seeded with beginner-friendly arithmetic and logic challenges:
+
+| Problem | Slug | Description | Function / Standard I/O |
+| :--- | :--- | :--- | :--- |
+| **Add Two Numbers** | `add-two-numbers` | Given integers $a$ and $b$, return $a + b$ | `add(a, b)` or `a + b` |
+| **Multiply Two Numbers** | `multiply-two-numbers` | Given integers $a$ and $b$, return $a \times b$ | `multiply(a, b)` or `a * b` |
+| **Even or Odd** | `even-or-odd` | Return `"Even"` or `"Odd"` for integer $n$ | `evenOrOdd(n)` or logic |
+| **Maximum of Two Numbers** | `maximum-of-two-numbers` | Return the larger of $a$ and $b$ | `findMax(a, b)` or `max(a, b)` |
+| **Square of a Number** | `square-of-number` | Return $n^2$ | `square(n)` or `n * n` |
+
+---
+
+## 🔑 Default Accounts & Credentials
+
+The platform is pre-seeded with dedicated assessment roles in Supabase:
+
+| Account | Username | Password | Role | Redirect Target | Permissions |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Participant 1** | `1` | `1` | `participant` | `/problems` | Write code, save drafts, run & submit |
+| **Participant 2** | `2` | `2` | `participant` | `/problems` | Separate isolated drafts & submissions |
+| **Administrator** | `osl-vvce` | `OSL` | `admin` | `/admin` | Manage problems, test cases, and CMS |
+
+> **Quick Login:** The `/login` page includes 1-click credential cards to instantly autofill and sign in as any of the three users.
+
+---
+
+## 💻 Quick Start (Local Development)
+
+### Prerequisites:
+* **Node.js** v18+ (tested with v20 and v24)
+* **npm** v9+
+* **Git**
+* *(No Docker or local compilers required!)*
+
+### 1. Clone the Repository
 ```bash
-docker build -t coding-judge-python judge/images/python
-docker build -t coding-judge-java   judge/images/java
-docker build -t coding-judge-node   judge/images/node
-docker build -t coding-judge-c      judge/images/c
-docker build -t coding-judge-cpp    judge/images/cpp
+git clone https://github.com/AniruddhaMJois/coding-platform-ani.git
+cd coding-platform-ani
+git checkout ANI
 ```
 
-### 3. Start the backend
-
+### 2. Install Dependencies
 ```bash
-cd server
 npm install
-npm start
 ```
 
-The server listens on port **3001** (override with the `PORT` environment variable). Leave this terminal running.
+### 3. Configure Environment Variables
+Create a `.env` file in the project root:
+```env
+DATABASE_URL="postgresql://postgres.[YOUR_PROJECT]:[YOUR_PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.[YOUR_PROJECT]:[YOUR_PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres"
+```
 
-### 4. Start the frontend
-
-In a **second terminal**, from the project root:
-
+### 4. Push Database Schema & Generate Prisma Client
 ```bash
-npm install
-npm start
+npx prisma generate
+npx prisma db push
 ```
 
-Open http://localhost:3000.
+### 5. Run the Application
+* **Development mode:**
+  ```bash
+  npm run dev
+  ```
+* **Production mode:**
+  ```bash
+  npm run build
+  npm start
+  ```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### 5. Verify it works
+---
 
-Choose **Python**, replace the code with the following, and click **Run Code**:
+## 🌐 Deployment to Vercel
 
-```python
-def solve(data):
-    return "hii"
+1. Push your changes to GitHub on branch `ANI`.
+2. Go to [Vercel](https://vercel.com) and import the repository `coding-platform-ani`.
+3. In **Project Settings &rarr; Environment Variables**, add:
+   * `DATABASE_URL`: Your Supabase transaction pooler connection string (port `6543`).
+   * `DIRECT_URL`: Your Supabase direct connection string (port `5432`).
+4. Click **Deploy**. Vercel will build the Next.js app and deploy serverless functions automatically.
+
+---
+
+## 📁 Project Structure
+
+```
+coding-platform-ani/
+├── prisma/
+│   └── schema.prisma              # Database models (User, Problem, TestCase, Submission, CodeDraft)
+├── src/
+│   ├── middleware.js              # Edge-level authentication & role routing guard
+│   ├── lib/
+│   │   ├── prisma.js              # Prisma Client singleton
+│   │   ├── executor.js            # Two-tier execution (Judge0 cloud sandbox + native fallback)
+│   │   └── realtime.js            # SSE and BroadcastChannel event dispatcher
+│   └── app/
+│       ├── layout.js              # Root layout with dynamic user badges and Logout button
+│       ├── login/                 # Assessment login portal with quick-login cards
+│       ├── problems/              # Problem catalog and practice environment
+│       │   └── [slug]/            # Monaco editor, anti-cheat, persistent drafts, timer
+│       ├── admin/                 # Instructor CMS with live test case management
+│       ├── contests/              # Contests overview page
+│       ├── submissions/           # User-scoped submission history
+│       └── api/
+│           ├── auth/              # Login, logout, session verification
+│           ├── problems/          # Public problem catalog (hidden cases excluded)
+│           ├── admin/             # Instructor problem and test case endpoints (role protected)
+│           ├── drafts/            # User-isolated 64KB draft saving
+│           ├── run/               # Sample case testing via cloud sandbox
+│           ├── submit/            # Full test suite evaluation with masked outputs
+│           └── submissions/       # Submission logs filtered by user
+└── README.md
 ```
 
-You should see `stdout: hii` and `exit code: 0`. Test cases may show "Failed" for placeholder code; that is expected.
+---
 
-### Environment variables
+## 🛡️ Summary of Platform Safeguards
 
-The frontend sends requests to `http://localhost:3001` by default. To point it at a different backend, copy `.env.example` to `.env.local` in the project root:
-
-```bash
-REACT_APP_API_BASE_URL=http://localhost:3001
-```
-
-Restart `npm start` after changing it.
-
-### Troubleshooting
-
-| Error | Cause | Fix |
-| --- | --- | --- |
-| "Internal Server Error" in the editor; backend logs `spawn docker ENOENT` | Docker is not installed, not running, or not on your PATH | Install and start Docker Desktop, open a new terminal, and confirm `docker info` works |
-| `Unable to find image 'coding-judge-<lang>:latest' locally` | The judge image for the selected language has not been built | Run the matching `docker build -t coding-judge-<lang> judge/images/<lang>` command |
-| `/bin/sh: 1: /usr/local/bin/compile: not found` (Windows) | Git converted `judge/` scripts to CRLF line endings | Run `git config core.autocrlf input`, delete and re-checkout the `judge/` folder (`git checkout -- judge`), then rebuild with `docker build --no-cache -t coding-judge-<lang> judge/images/<lang>` |
-| `NameError: name 'solve' is not defined` | The platform calls a function named `solve` in your code | Define `def solve(data): ...` |
-
-`npm install` prints many deprecation warnings and `npm audit` findings. These come from old pinned dependencies and are safe to ignore for local development.
-
-
-## Running the backend tests
-
-The `/execute` API is covered by Jest + Supertest tests in `server/tests/execute.test.js`. Docker is mocked, so you do not need Docker or the judge images to run them.
-
-```bash
-cd server
-npm install
-npm test
-```
-
-The suite covers passing and failing submissions, compile errors, runtime errors, an empty body, missing or malformed fields, unsupported languages and Docker being unavailable.
-
-## Developer notes
-
-- Frontend now calls the Docker-backed `/execute` endpoint and shows `compileError`, `stderr`, and non-zero exit statuses prominently.
-- `REACT_APP_API_BASE_URL` is used for configuring the API base URL in different environments.
-
-## Tech stack
-
-- Backend: Node.js (Express)
-- Frontend: React (Create React App) and CodeMirror for the editor
-- Sandboxing: Docker judge images (GCC for C/C++, Temurin JDK for Java, Python 3, Node.js)
-
-
-
-
-
+| Feature | Protection Mechanism |
+| :--- | :--- |
+| **Authentication Wall** | All features and API endpoints require login; unauthenticated traffic redirected to `/login`. |
+| **Hidden Test Cases** | Masked at SQL query level; outputs (`input`, `expected`, `stdout`) sanitized to `null` on submit. |
+| **Copy & Paste** | Context menu disabled; clipboard events and keyboard shortcuts blocked with warning toasts. |
+| **Tab Switching** | Document visibility tracked with 3 strikes in sessionStorage; auto-submits on strike 3. |
+| **Timer Integrity** | End timestamp stored in browser storage; surviving reloads and browser restarts. |
+| **Database Bloat** | 64KB code draft cap with unique `(problemId, userId, language)` upsert deduplication. |
+| **Cloud Compatibility** | Zero Docker dependency; runs natively on Vercel Serverless Functions. |

@@ -11,6 +11,14 @@ export async function GET(request) {
       return NextResponse.json({ error: 'Unauthorized: Please log in to view problems' }, { status: 401 });
     }
 
+    let effectiveUserId = null;
+    let userRole = null;
+    try {
+      const parsed = JSON.parse(cookie.value);
+      effectiveUserId = parsed?.id ? Number(parsed.id) : null;
+      userRole = parsed?.role;
+    } catch (e) {}
+
     const { searchParams } = new URL(request.url);
     const slug = searchParams.get('slug');
     const where = slug ? { slug } : {};
@@ -42,10 +50,38 @@ export async function GET(request) {
       orderBy: { id: 'asc' }
     });
 
+    let solvedProblemIds = new Set();
+    let acceptedSubmissionsMap = {};
+    if (effectiveUserId && userRole !== 'admin') {
+      const solvedSubmissions = await prisma.submission.findMany({
+        where: {
+          userId: effectiveUserId,
+          status: 'Accepted'
+        },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          problemId: true,
+          code: true,
+          language: true,
+          score: true,
+          createdAt: true
+        }
+      });
+      for (const sub of solvedSubmissions) {
+        solvedProblemIds.add(sub.problemId);
+        if (!acceptedSubmissionsMap[sub.problemId]) {
+          acceptedSubmissionsMap[sub.problemId] = sub;
+        }
+      }
+    }
+
     const formatted = problems.map(p => ({
       ...p,
       constraints: JSON.parse(p.constraints || '[]'),
-      templates: JSON.parse(p.templates || '{}')
+      templates: JSON.parse(p.templates || '{}'),
+      isSolved: solvedProblemIds.has(p.id),
+      acceptedSubmission: acceptedSubmissionsMap[p.id] || null
     }));
 
     if (slug) {

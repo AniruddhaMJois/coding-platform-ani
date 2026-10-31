@@ -31,6 +31,7 @@ export default function ProblemEditorPage({ params }) {
   const [violations, setViolations] = useState(0);
   const [showViolationModal, setShowViolationModal] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  const [isSolved, setIsSolved] = useState(false);
   const [antiCheatToast, setAntiCheatToast] = useState(null);
 
   // Keep a ref to latest code & language for auto-submit
@@ -130,6 +131,10 @@ export default function ProblemEditorPage({ params }) {
           const current = data.problems.find(p => p.slug === slug) || data.problems[0];
           setProblem(current);
 
+          if (current.isSolved) {
+            setIsSolved(true);
+          }
+
           // Fetch explicit draft from database
           const draftRes = await fetch(`/api/drafts?problemId=${current.id}&language=${currentLangRef.current}`);
           const draftData = await draftRes.json();
@@ -137,6 +142,13 @@ export default function ProblemEditorPage({ params }) {
           if (draftData.draft?.code) {
             setCode(draftData.draft.code);
             setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
+            setHasUnsavedChanges(false);
+          } else if (current.acceptedSubmission?.code) {
+            setCode(current.acceptedSubmission.code);
+            if (current.acceptedSubmission.language) {
+              setLanguage(current.acceptedSubmission.language);
+            }
+            setLastSavedTime(new Date(current.acceptedSubmission.createdAt).toLocaleTimeString());
             setHasUnsavedChanges(false);
           } else {
             setCode(''); // Clean empty editor - no pre-existing code
@@ -159,6 +171,9 @@ export default function ProblemEditorPage({ params }) {
       const res = await fetch(`/api/problems?slug=${slug}`, { cache: 'no-store' });
       const data = await res.json();
       if (data.problem) {
+        if (data.problem.isSolved) {
+          setIsSolved(true);
+        }
         setProblem(prev => {
           if (!prev) return data.problem;
           return {
@@ -367,14 +382,14 @@ export default function ProblemEditorPage({ params }) {
 
   // 10. Code change handler - flags unsaved changes
   const handleCodeChange = (newCode) => {
-    if (isLocked || isExpired) return;
+    if (isLocked || isExpired || isSolved) return;
     setCode(newCode || '');
     setHasUnsavedChanges(true);
   };
 
   // 11. Explicit Save Code Handler (Efficient DB persistence)
   const handleSaveCode = async () => {
-    if (!problem || isLocked || isExpired) return;
+    if (!problem || isLocked || isExpired || isSolved) return;
     setSaving(true);
 
     try {
@@ -396,6 +411,9 @@ export default function ProblemEditorPage({ params }) {
         setOutput(`Code draft saved successfully to database at ${timeStr}`);
       } else {
         alert(`Failed to save draft: ${data.error}`);
+        if (data.error?.includes('already solved')) {
+          setIsSolved(true);
+        }
       }
     } catch (err) {
       alert(`Save error: ${err.message}`);
@@ -406,7 +424,7 @@ export default function ProblemEditorPage({ params }) {
 
   // 12. Run Code (Public sample test cases only)
   const handleRunCode = async () => {
-    if (!problem || isLocked || isExpired) return;
+    if (!problem || isLocked || isExpired || isSolved) return;
     setRunning(true);
     setActiveTab('tests');
     setOutput('Running public test cases in isolated sandbox...');
@@ -426,6 +444,9 @@ export default function ProblemEditorPage({ params }) {
       const data = await res.json();
       if (data.error) {
         setOutput(`Execution Error: ${data.error}`);
+        if (data.isSolved) {
+          setIsSolved(true);
+        }
         setTestResults([]);
       } else {
         setTestResults(data.results || []);
@@ -441,7 +462,7 @@ export default function ProblemEditorPage({ params }) {
 
   // 13. Submit Code (Full hidden test evaluation)
   const handleSubmitCode = async () => {
-    if (!problem || isLocked || isExpired) return;
+    if (!problem || isLocked || isExpired || isSolved) return;
     setSubmitting(true);
     setActiveTab('tests');
     setOutput('Grading submission against full test suite in cloud sandbox...');
@@ -461,11 +482,22 @@ export default function ProblemEditorPage({ params }) {
       const data = await res.json();
       if (data.error) {
         setOutput(`Submission Error: ${data.error}`);
+        if (data.isSolved) {
+          setIsSolved(true);
+        }
       } else {
         setTestResults(data.results || []);
-        setOutput(
-          `Status: ${data.status} | Score: ${data.score}% (${data.passedTests}/${data.totalTests} tests passed)\nSubmission recorded in database with ID #${data.submissionId}`
-        );
+        if (data.status === 'Accepted' || data.isSolved) {
+          setIsSolved(true);
+          setOutput(
+            `🎉 Status: Accepted (100% Score) — Congratulations! You have successfully solved this challenge.\n` +
+            `Further attempts on this challenge are disabled. Submission recorded with ID #${data.submissionId}`
+          );
+        } else {
+          setOutput(
+            `Status: ${data.status} | Score: ${data.score}% (${data.passedTests}/${data.totalTests} tests passed)\nSubmission recorded in database with ID #${data.submissionId}`
+          );
+        }
       }
     } catch (err) {
       setOutput(`Network Error: ${err.message}`);
@@ -602,6 +634,48 @@ export default function ProblemEditorPage({ params }) {
 
       {/* Left Pane: Problem Description & Live Test Cases */}
       <div className="problem-panel">
+        {/* Problem Solved Celebratory Banner */}
+        {isSolved && (
+          <div 
+            style={{ 
+              background: 'linear-gradient(90deg, rgba(6, 78, 59, 0.45), rgba(4, 120, 87, 0.35))', 
+              border: '1px solid #10b981', 
+              color: '#d1fae5', 
+              padding: '0.85rem 1.15rem', 
+              borderRadius: '8px', 
+              marginBottom: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.2)'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontSize: '1.5rem' }}>🎉</span>
+              <div>
+                <div style={{ fontWeight: 700, color: '#34d399', fontSize: '0.95rem' }}>
+                  Problem Solved (Accepted)
+                </div>
+                <div style={{ fontSize: '0.82rem', color: '#d1fae5' }}>
+                  You have successfully solved this challenge with 100% test score! Further attempts are disabled.
+                </div>
+              </div>
+            </div>
+            <span style={{
+              background: '#065f46',
+              color: '#6ee7b7',
+              padding: '0.35rem 0.75rem',
+              borderRadius: '9999px',
+              fontSize: '0.8rem',
+              fontWeight: 700,
+              border: '1px solid #059669',
+              whiteSpace: 'nowrap'
+            }}>
+              Completed ✓
+            </span>
+          </div>
+        )}
+
         {/* Real-time Notification Banner */}
         {liveNotice && (
           <div 
@@ -628,6 +702,11 @@ export default function ProblemEditorPage({ params }) {
             Problem {currentIndex + 1} of {allProblems.length}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {isSolved && (
+              <span style={{ fontSize: '0.75rem', color: '#34d399', background: 'rgba(16, 185, 129, 0.15)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #10b981', fontWeight: 600 }}>
+                ✓ Solved
+              </span>
+            )}
             {violations > 0 && (
               <span style={{ fontSize: '0.75rem', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #f59e0b' }}>
                 ⚠️ {violations}/3 Strikes
@@ -736,7 +815,7 @@ export default function ProblemEditorPage({ params }) {
               </button>
             )}
 
-            <select value={language} onChange={(e) => handleLanguageChange(e.target.value)} disabled={isLocked || isExpired}>
+            <select value={language} onChange={(e) => handleLanguageChange(e.target.value)} disabled={isLocked || isExpired || isSolved}>
               <option value="javascript">JavaScript (Node.js)</option>
               <option value="python">Python 3</option>
               <option value="c">C (GCC)</option>
@@ -747,11 +826,13 @@ export default function ProblemEditorPage({ params }) {
             {/* Explicit Save Button & Status */}
             <button 
               onClick={handleSaveCode}
-              disabled={saving || isLocked || isExpired}
+              disabled={saving || isLocked || isExpired || isSolved}
               className="nav-btn"
               style={{
                 borderColor: hasUnsavedChanges ? '#f59e0b' : '#334155',
                 color: hasUnsavedChanges ? '#fbbf24' : '#94a3b8',
+                opacity: isSolved ? 0.5 : 1,
+                cursor: isSolved ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.35rem',
@@ -786,18 +867,20 @@ export default function ProblemEditorPage({ params }) {
 
             <button 
               onClick={handleRunCode} 
-              disabled={running || submitting || isLocked || isExpired} 
+              disabled={running || submitting || isLocked || isExpired || isSolved} 
               className="btn-run"
+              style={isSolved ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
             >
-              {running ? 'Running...' : 'Run Code'}
+              {isSolved ? 'Solved ✓' : running ? 'Running...' : 'Run Code'}
             </button>
 
             <button 
               onClick={handleSubmitCode} 
-              disabled={running || submitting || isLocked || isExpired} 
+              disabled={running || submitting || isLocked || isExpired || isSolved} 
               className="btn-submit"
+              style={isSolved ? { opacity: 0.7, cursor: 'not-allowed', background: '#059669', borderColor: '#10b981' } : {}}
             >
-              {submitting ? 'Submitting...' : 'Submit'}
+              {isSolved ? 'Solved ✓' : submitting ? 'Submitting...' : 'Submit'}
             </button>
 
             <button 
@@ -848,7 +931,7 @@ export default function ProblemEditorPage({ params }) {
               automaticLayout: true,
               tabSize: 2,
               contextmenu: false, // Disables right-click context menu
-              readOnly: isLocked || isExpired
+              readOnly: isLocked || isExpired || isSolved
             }}
           />
         </div>

@@ -155,11 +155,20 @@ export default function ProblemsPage() {
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {p.isSolved && (
+                  <span className="badge" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid #10b981', fontWeight: 600 }}>
+                    ✓ Solved
+                  </span>
+                )}
                 <span className={`badge ${p.difficulty === 'Easy' ? 'badge-easy' : 'badge-medium'}`}>
                   {p.difficulty}
                 </span>
-                <Link href={`/problems/${p.slug}`} className="nav-btn primary">
-                  Solve Challenge →
+                <Link 
+                  href={`/problems/${p.slug}`} 
+                  className={`nav-btn ${p.isSolved ? '' : 'primary'}`}
+                  style={p.isSolved ? { borderColor: '#10b981', color: '#6ee7b7', background: 'rgba(16, 185, 129, 0.1)' } : {}}
+                >
+                  {p.isSolved ? 'View Solution ✓' : 'Solve Challenge →'}
                 </Link>
               </div>
             </div>

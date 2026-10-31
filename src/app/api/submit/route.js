@@ -27,6 +27,34 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Problem not found' }, { status: 404 });
     }
 
+    let effectiveUserId = userId ? Number(userId) : null;
+    let userRole = null;
+    if (cookie?.value) {
+      try {
+        const parsed = JSON.parse(cookie.value);
+        if (!effectiveUserId) effectiveUserId = parsed?.id ? Number(parsed.id) : null;
+        userRole = parsed?.role;
+      } catch (e) {}
+    }
+
+    // Disallow submissions if already solved
+    if (userRole !== 'admin' && effectiveUserId) {
+      const alreadySolved = await prisma.submission.findFirst({
+        where: {
+          problemId: problem.id,
+          userId: effectiveUserId,
+          status: 'Accepted'
+        }
+      });
+
+      if (alreadySolved) {
+        return NextResponse.json(
+          { error: 'Problem already solved. Further attempts are disabled.', isSolved: true },
+          { status: 403 }
+        );
+      }
+    }
+
     const results = await executeSubmission({
       language,
       code,
@@ -47,14 +75,6 @@ export async function POST(request) {
       status = 'Wrong Answer';
     }
 
-    let effectiveUserId = userId ? Number(userId) : null;
-    if (!effectiveUserId) {
-      const cookie = request.cookies.get('platform_auth');
-      if (cookie?.value) {
-        try { effectiveUserId = JSON.parse(cookie.value)?.id || null; } catch(e) {}
-      }
-    }
-
     // Persist submission in database
     const submission = await prisma.submission.create({
       data: {
@@ -69,6 +89,25 @@ export async function POST(request) {
         output: JSON.stringify(results.map(r => ({ passed: r.passed, timeMs: r.timeMs, stderr: r.stderr })))
       }
     });
+
+    // If accepted, also ensure draft reflects the successful code
+    if (status === 'Accepted' && effectiveUserId) {
+      try {
+        const existingDraft = await prisma.codeDraft.findFirst({
+          where: { problemId: problem.id, language, userId: effectiveUserId }
+        });
+        if (existingDraft) {
+          await prisma.codeDraft.update({
+            where: { id: existingDraft.id },
+            data: { code, updatedAt: new Date() }
+          });
+        } else {
+          await prisma.codeDraft.create({
+            data: { problemId: problem.id, language, code, userId: effectiveUserId }
+          });
+        }
+      } catch (e) {}
+    }
 
     const sanitizedResults = results.map((r, idx) => ({
       testIndex: idx + 1,
@@ -88,7 +127,8 @@ export async function POST(request) {
       status,
       passedTests: passedCount,
       totalTests: totalCount,
-      results: sanitizedResults
+      results: sanitizedResults,
+      isSolved: status === 'Accepted'
     });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

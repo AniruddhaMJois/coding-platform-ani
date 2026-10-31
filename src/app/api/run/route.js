@@ -29,6 +29,32 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Problem not found' }, { status: 404 });
     }
 
+    let effectiveUserId = null;
+    let userRole = null;
+    try {
+      const parsed = JSON.parse(cookie.value);
+      effectiveUserId = parsed?.id ? Number(parsed.id) : null;
+      userRole = parsed?.role;
+    } catch (e) {}
+
+    // If user is a participant and has already solved this problem, disallow running code
+    if (userRole !== 'admin' && effectiveUserId) {
+      const alreadySolved = await prisma.submission.findFirst({
+        where: {
+          problemId: problem.id,
+          userId: effectiveUserId,
+          status: 'Accepted'
+        }
+      });
+
+      if (alreadySolved) {
+        return NextResponse.json(
+          { error: 'Problem already solved. Further attempts are disabled.', isSolved: true },
+          { status: 403 }
+        );
+      }
+    }
+
     const results = await executeSubmission({
       language,
       code,

@@ -6,6 +6,11 @@ export const revalidate = 0;
 
 export async function GET(request) {
   try {
+    const cookie = request.cookies.get('platform_auth');
+    if (!cookie?.value) {
+      return NextResponse.json({ error: 'Unauthorized: Please log in to view problems' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const slug = searchParams.get('slug');
     const where = slug ? { slug } : {};

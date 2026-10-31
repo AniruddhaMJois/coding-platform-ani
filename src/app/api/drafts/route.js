@@ -24,6 +24,10 @@ export async function GET(request) {
       }
     }
 
+    if (!effectiveUserId) {
+      return NextResponse.json({ error: 'Unauthorized: Please log in to view saved drafts' }, { status: 401 });
+    }
+
     const draft = await prisma.codeDraft.findFirst({
       where: {
         problemId: Number(problemId),
@@ -63,6 +67,10 @@ export async function POST(request) {
       if (cookie?.value) {
         try { effectiveUserId = JSON.parse(cookie.value)?.id || null; } catch(e) {}
       }
+    }
+
+    if (!effectiveUserId) {
+      return NextResponse.json({ error: 'Unauthorized: Please log in to save code drafts' }, { status: 401 });
     }
 
     // Check if draft already exists

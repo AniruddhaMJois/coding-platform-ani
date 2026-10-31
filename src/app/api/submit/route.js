@@ -4,6 +4,11 @@ const { executeSubmission } = require('@/lib/executor');
 
 export async function POST(request) {
   try {
+    const cookie = request.cookies.get('platform_auth');
+    if (!cookie?.value) {
+      return NextResponse.json({ error: 'Unauthorized: Please log in to submit code' }, { status: 401 });
+    }
+
     const { problemId, slug, language, code, userId } = await request.json();
 
     if (!language || !code) {

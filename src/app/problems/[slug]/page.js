@@ -22,6 +22,7 @@ export default function ProblemEditorPage({ params }) {
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState(null);
+  const [draftSavedNotice, setDraftSavedNotice] = useState(false);
   const [liveNotice, setLiveNotice] = useState(null);
 
   // User, Anti-Cheat & Timer states
@@ -290,7 +291,27 @@ export default function ProblemEditorPage({ params }) {
     };
   }, [currentUser]);
 
-  // 6. Anti-Cheat: Tab Switching ONLY for Participants inside active coding session
+  // 6. Auto-submit handler (called on Timeout or 3rd Strike)
+  const handleAutoSubmit = useCallback(async (reason) => {
+    if (!problem) return;
+    try {
+      await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problemId: problem.id,
+          slug: problem.slug,
+          language: currentLangRef.current,
+          code: currentCodeRef.current
+        })
+      });
+      setOutput(`Auto-submitted: ${reason}`);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [problem]);
+
+  // 7. Anti-Cheat: Tab Switching ONLY for Participants inside active coding session
   useEffect(() => {
     if (!currentUser || currentUser.role !== 'participant') return;
 
@@ -317,10 +338,10 @@ export default function ProblemEditorPage({ params }) {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [currentUser, handleAutoSubmit]);
 
-  // 7. Warn before closing or navigating away if unsaved changes exist
+  // 8. Warn before closing or navigating away if unsaved changes exist
   useEffect(() => {
     const handleBeforeUnload = (e) => {
-      if (hasUnsavedChanges) {
+      if (hasUnsavedChanges && !isSolved) {
         e.preventDefault();
         e.returnValue = 'You have unsaved code. Please click Save Draft before leaving.';
         return e.returnValue;
@@ -328,27 +349,7 @@ export default function ProblemEditorPage({ params }) {
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [hasUnsavedChanges]);
-
-  // 8. Auto-submit handler (called on Timeout or 3rd Strike)
-  const handleAutoSubmit = useCallback(async (reason) => {
-    if (!problem) return;
-    try {
-      await fetch('/api/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problemId: problem.id,
-          slug: problem.slug,
-          language: currentLangRef.current,
-          code: currentCodeRef.current
-        })
-      });
-      setOutput(`Auto-submitted: ${reason}`);
-    } catch (e) {
-      console.error(e);
-    }
-  }, [problem]);
+  }, [hasUnsavedChanges, isSolved]);
 
   // Handle Timeout trigger
   useEffect(() => {
@@ -408,6 +409,8 @@ export default function ProblemEditorPage({ params }) {
         setHasUnsavedChanges(false);
         const timeStr = new Date(data.savedAt).toLocaleTimeString();
         setLastSavedTime(timeStr);
+        setDraftSavedNotice(true);
+        setTimeout(() => setDraftSavedNotice(false), 3000);
         setOutput(`Code draft saved successfully to database at ${timeStr}`);
       } else {
         alert(`Failed to save draft: ${data.error}`);
@@ -487,6 +490,7 @@ export default function ProblemEditorPage({ params }) {
         }
       } else {
         setTestResults(data.results || []);
+        setHasUnsavedChanges(false);
         if (data.status === 'Accepted' || data.isSolved) {
           setIsSolved(true);
           setOutput(
@@ -829,8 +833,9 @@ export default function ProblemEditorPage({ params }) {
               disabled={saving || isLocked || isExpired || isSolved}
               className="nav-btn"
               style={{
-                borderColor: hasUnsavedChanges ? '#f59e0b' : '#334155',
-                color: hasUnsavedChanges ? '#fbbf24' : '#94a3b8',
+                borderColor: draftSavedNotice ? '#10b981' : hasUnsavedChanges ? '#f59e0b' : '#334155',
+                color: draftSavedNotice ? '#34d399' : hasUnsavedChanges ? '#fbbf24' : '#94a3b8',
+                background: draftSavedNotice ? 'rgba(16, 185, 129, 0.1)' : 'transparent',
                 opacity: isSolved ? 0.5 : 1,
                 cursor: isSolved ? 'not-allowed' : 'pointer',
                 display: 'flex',
@@ -840,7 +845,7 @@ export default function ProblemEditorPage({ params }) {
                 padding: '0.35rem 0.65rem'
               }}
             >
-              💾 {saving ? 'Saving...' : 'Save Draft'}
+              {saving ? '⏳ Saving...' : draftSavedNotice ? '✓ Saved!' : '💾 Save Draft'}
             </button>
 
             {hasUnsavedChanges ? (
@@ -924,6 +929,14 @@ export default function ProblemEditorPage({ params }) {
             theme="vs-dark"
             value={code}
             onChange={handleCodeChange}
+            onMount={(editor) => {
+              editor.onDidChangeModelContent(() => {
+                const val = editor.getValue();
+                currentCodeRef.current = val;
+                setCode(val);
+                setHasUnsavedChanges(true);
+              });
+            }}
             options={{
               fontSize: 14,
               minimap: { enabled: false },

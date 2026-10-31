@@ -42,11 +42,19 @@ export async function POST(request) {
       status = 'Wrong Answer';
     }
 
+    let effectiveUserId = userId ? Number(userId) : null;
+    if (!effectiveUserId) {
+      const cookie = request.cookies.get('platform_auth');
+      if (cookie?.value) {
+        try { effectiveUserId = JSON.parse(cookie.value)?.id || null; } catch(e) {}
+      }
+    }
+
     // Persist submission in database
     const submission = await prisma.submission.create({
       data: {
         problemId: problem.id,
-        userId: userId || null,
+        userId: effectiveUserId,
         language,
         code,
         score,

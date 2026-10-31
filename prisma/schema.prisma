@@ -10,8 +10,10 @@ generator client {
 
 model User {
   id          Int          @id @default(autoincrement())
+  username    String       @unique
+  password    String
   name        String
-  email       String       @unique
+  email       String?      @unique
   role        String       @default("participant") // "admin" | "participant"
   submissions Submission[]
   drafts      CodeDraft[]

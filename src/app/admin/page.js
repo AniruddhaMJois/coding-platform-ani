@@ -2,8 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 export default function AdminPage() {
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [problems, setProblems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -50,7 +54,25 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    fetchProblems();
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.user && data.user.role === 'admin') {
+          setCurrentUser(data.user);
+          fetchProblems();
+        } else {
+          setCurrentUser(null);
+          setLoading(false);
+        }
+      } catch (e) {
+        setCurrentUser(null);
+        setLoading(false);
+      } finally {
+        setAuthChecked(true);
+      }
+    }
+    checkAuth();
 
     // Listen to real-time events via SSE
     let es;
@@ -286,6 +308,32 @@ export default function AdminPage() {
       alert(`Error deleting test case: ${e.message}`);
     }
   };
+
+  if (!authChecked) {
+    return (
+      <div className="container" style={{ textAlign: 'center', marginTop: '6rem', color: '#94a3b8' }}>
+        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
+        <p>Verifying administrative credentials...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser || currentUser.role !== 'admin') {
+    return (
+      <div className="container" style={{ maxWidth: '480px', marginTop: '4rem', textAlign: 'center' }}>
+        <div className="card" style={{ padding: '2.5rem 2rem', background: '#131b2e', border: '1px solid #1e293b' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🛡️</div>
+          <h2 style={{ color: '#fff', marginBottom: '0.75rem' }}>Admin Access Required</h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.9rem', lineHeight: '1.5', marginBottom: '1.5rem' }}>
+            This page is restricted to platform administrators (<code>osl-vvce</code>). Please log in with an administrator account to manage problems, test cases, and contest settings.
+          </p>
+          <Link href="/login" className="btn btn-primary" style={{ display: 'inline-block', padding: '0.65rem 1.5rem' }}>
+            Go to Admin Login
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container">

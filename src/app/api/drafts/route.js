@@ -16,11 +16,19 @@ export async function GET(request) {
       return NextResponse.json({ error: 'problemId and language required' }, { status: 400 });
     }
 
+    let effectiveUserId = userId ? Number(userId) : null;
+    if (!effectiveUserId) {
+      const cookie = request.cookies.get('platform_auth');
+      if (cookie?.value) {
+        try { effectiveUserId = JSON.parse(cookie.value)?.id || null; } catch(e) {}
+      }
+    }
+
     const draft = await prisma.codeDraft.findFirst({
       where: {
         problemId: Number(problemId),
         language,
-        userId: userId ? Number(userId) : null
+        userId: effectiveUserId
       }
     });
 
@@ -49,12 +57,20 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Code exceeds maximum draft size (64KB)' }, { status: 400 });
     }
 
+    let effectiveUserId = userId ? Number(userId) : null;
+    if (!effectiveUserId) {
+      const cookie = request.cookies.get('platform_auth');
+      if (cookie?.value) {
+        try { effectiveUserId = JSON.parse(cookie.value)?.id || null; } catch(e) {}
+      }
+    }
+
     // Check if draft already exists
     const existing = await prisma.codeDraft.findFirst({
       where: {
         problemId: Number(problemId),
         language,
-        userId: userId ? Number(userId) : null
+        userId: effectiveUserId
       }
     });
 
@@ -82,7 +98,7 @@ export async function POST(request) {
           problemId: Number(problemId),
           language,
           code: cleanCode,
-          userId: userId ? Number(userId) : null
+          userId: effectiveUserId
         }
       });
     }

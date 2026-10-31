@@ -102,7 +102,7 @@ export default function ProblemEditorPage({ params }) {
             setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
             setHasUnsavedChanges(false);
           } else {
-            setCode(current.templates[currentLangRef.current] || '// Write your solution here');
+            setCode(''); // Clean empty editor - no pre-existing code
             setLastSavedTime(null);
             setHasUnsavedChanges(false);
           }
@@ -313,12 +313,12 @@ export default function ProblemEditorPage({ params }) {
         setLastSavedTime(new Date(draftData.draft.updatedAt).toLocaleTimeString());
         setHasUnsavedChanges(false);
       } else {
-        setCode(problem.templates?.[newLang] || '// Write your solution here');
+        setCode(''); // Keep empty
         setLastSavedTime(null);
         setHasUnsavedChanges(false);
       }
     } catch (e) {
-      setCode(problem.templates?.[newLang] || '// Write your solution here');
+      setCode('');
     }
   };
 

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 const { prisma } = require('@/lib/prisma');
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const submissions = await prisma.submission.findMany({

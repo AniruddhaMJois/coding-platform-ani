@@ -93,6 +93,21 @@ function checkDocker() {
 // Wrap user code to handle execution
 function wrapUserCode(language, userCode, funcName = null) {
   const lang = (language || '').toLowerCase();
+
+  // If user code contains its own entry point / standard I/O, run directly without wrapping
+  if (lang === 'python' && (userCode.includes('if __name__') || userCode.includes('sys.stdin'))) {
+    return userCode;
+  }
+  if ((lang === 'javascript' || lang === 'js') && (userCode.includes('fs.readFileSync') || userCode.includes('readline') || userCode.includes('process.stdin'))) {
+    return userCode;
+  }
+  if ((lang === 'c' || lang === 'cpp' || lang === 'c++') && userCode.includes('main(')) {
+    return userCode;
+  }
+  if (lang === 'java' && userCode.includes('public static void main')) {
+    return userCode;
+  }
+
   switch (lang) {
     case 'python':
       return `
@@ -107,24 +122,34 @@ if __name__ == '__main__':
     if fn and callable(fn):
         lines = [line.strip() for line in raw.split('\\n') if line.strip()]
         try:
-            # Handle standard problem formats
-            if len(lines) == 1 and ',' in lines[0] and not lines[0].startswith('['):
-                parts = [p.strip() for p in lines[0].split(',')]
-                res = fn(*parts)
+            # 3 lines: e.g. length, array, target (Two Sum)
+            if len(lines) == 3:
+                nums = [int(x) for x in lines[1].split()]
+                target = int(lines[2])
+                try:
+                    res = fn(nums, target)
+                except TypeError:
+                    res = fn(int(lines[0]), nums, target)
             elif len(lines) == 2:
-                # Array and target or length and array
                 try:
                     p1 = json.loads(lines[0])
                 except:
-                    p1 = [int(x) for x in lines[0].split()] if all(x.lstrip('-').isdigit() for x in lines[0].split()) else lines[0]
+                    p1 = [int(x) for x in lines[0].split()] if (lines[0].split() and all(x.lstrip('-').isdigit() for x in lines[0].split())) else (int(lines[0]) if lines[0].lstrip('-').isdigit() else lines[0])
                 try:
-                    p2 = int(lines[1])
+                    p2 = json.loads(lines[1])
                 except:
-                    p2 = lines[1]
-                try:
-                    res = fn(p1, p2)
-                except TypeError:
-                    res = fn(p1)
+                    p2 = [int(x) for x in lines[1].split()] if (lines[1].split() and all(x.lstrip('-').isdigit() for x in lines[1].split())) else (int(lines[1]) if lines[1].lstrip('-').isdigit() else lines[1])
+
+                if isinstance(p1, int) and isinstance(p2, list):
+                    try:
+                        res = fn(p2)
+                    except TypeError:
+                        res = fn(p1, p2)
+                else:
+                    try:
+                        res = fn(p1, p2)
+                    except TypeError:
+                        res = fn(p1)
             elif len(lines) == 1:
                 arg = lines[0]
                 if arg.lstrip('-').isdigit():
@@ -134,13 +159,19 @@ if __name__ == '__main__':
                 elif ' ' in arg and all(x.lstrip('-').isdigit() for x in arg.split()):
                     res = fn([int(x) for x in arg.split()])
                 else:
-                    res = fn(arg)
+                    try:
+                        res = fn(list(arg))
+                    except:
+                        res = fn(arg)
             else:
                 res = fn(raw)
+
             if res is not None:
                 if isinstance(res, bool):
                     print('true' if res else 'false')
-                elif isinstance(res, (list, dict)):
+                elif isinstance(res, (list, tuple)):
+                    print(json.dumps(list(res), separators=(',', ':')))
+                elif isinstance(res, dict):
                     print(json.dumps(res, separators=(',', ':')))
                 else:
                     print(res)
@@ -168,13 +199,23 @@ try {
   if (fn) {
     const lines = raw.split('\\n').map(l => l.trim()).filter(Boolean);
     let res;
-    if (lines.length === 2) {
+    if (lines.length === 3) {
+      const nums = lines[1].split(' ').map(Number);
+      const target = Number(lines[2]);
+      try { res = fn(nums, target); } catch(e) { res = fn(Number(lines[0]), nums, target); }
+    } else if (lines.length === 2) {
       let p1, p2;
       try { p1 = JSON.parse(lines[0]); } catch(e) {
-        p1 = lines[0].split(' ').map(Number);
+        p1 = lines[0].split(' ').length > 1 ? lines[0].split(' ').map(Number) : (isNaN(Number(lines[0])) ? lines[0] : Number(lines[0]));
       }
-      p2 = isNaN(Number(lines[1])) ? lines[1] : Number(lines[1]);
-      try { res = fn(p1, p2); } catch(e) { res = fn(p1); }
+      try { p2 = JSON.parse(lines[1]); } catch(e) {
+        p2 = lines[1].split(' ').length > 1 ? lines[1].split(' ').map(Number) : (isNaN(Number(lines[1])) ? lines[1] : Number(lines[1]));
+      }
+      if (typeof p1 === 'number' && Array.isArray(p2)) {
+        try { res = fn(p2); } catch(e) { res = fn(p1, p2); }
+      } else {
+        try { res = fn(p1, p2); } catch(e) { res = fn(p1); }
+      }
     } else if (lines.length === 1) {
       const arg = lines[0];
       if (!isNaN(Number(arg)) && arg !== '') {
@@ -184,7 +225,11 @@ try {
       } else if (arg.includes(' ') && arg.split(' ').every(x => !isNaN(Number(x)))) {
         res = fn(arg.split(' ').map(Number));
       } else {
-        res = fn(arg);
+        try {
+          res = fn(arg.split(''));
+        } catch(e) {
+          res = fn(arg);
+        }
       }
     } else {
       res = fn(raw);

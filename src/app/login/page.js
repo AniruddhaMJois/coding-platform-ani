@@ -26,6 +26,8 @@ export default function LoginPage() {
       if (res.ok && data.user) {
         // Broadcast login state
         if (typeof window !== 'undefined') {
+          sessionStorage.clear();
+          localStorage.removeItem('platform_contest_end_time');
           localStorage.setItem('platform_user', JSON.stringify(data.user));
           window.dispatchEvent(new Event('auth_changed'));
         }

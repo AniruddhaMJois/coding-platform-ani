@@ -24,7 +24,8 @@ export default function ProblemEditorPage({ params }) {
   const [lastSavedTime, setLastSavedTime] = useState(null);
   const [liveNotice, setLiveNotice] = useState(null);
 
-  // Anti-Cheat & Timer states
+  // User, Anti-Cheat & Timer states
+  const [currentUser, setCurrentUser] = useState(null);
   const [timeLeft, setTimeLeft] = useState(CONTEST_DURATION_SECONDS);
   const [isExpired, setIsExpired] = useState(false);
   const [violations, setViolations] = useState(0);
@@ -42,45 +43,81 @@ export default function ProblemEditorPage({ params }) {
   const isExpiredRef = useRef(isExpired);
   isExpiredRef.current = isExpired;
 
-  // 1. Initialize Persistent Timer from Storage (Cannot be reset by page refresh)
+  // 1. Initialize Active User & Coding Session Timer
   useEffect(() => {
-    let endTime = localStorage.getItem('platform_contest_end_time');
-    if (!endTime) {
-      endTime = (Date.now() + CONTEST_DURATION_SECONDS * 1000).toString();
-      localStorage.setItem('platform_contest_end_time', endTime);
-    }
+    async function initUserAndSession() {
+      let user = null;
+      if (typeof window !== 'undefined') {
+        const cached = localStorage.getItem('platform_user');
+        if (cached) {
+          try {
+            user = JSON.parse(cached);
+            setCurrentUser(user);
+          } catch (e) {}
+        }
+      }
 
-    const calcRemaining = () => {
-      const remaining = Math.floor((parseInt(endTime, 10) - Date.now()) / 1000);
-      return remaining > 0 ? remaining : 0;
-    };
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.user) {
+          user = data.user;
+          setCurrentUser(user);
+        }
+      } catch (e) {}
 
-    const initial = calcRemaining();
-    setTimeLeft(initial);
-    if (initial <= 0) {
-      setIsExpired(true);
-    }
+      // If user is Admin, they are evaluating/managing problems: timer & locks do not apply
+      if (user?.role === 'admin') {
+        setTimeLeft(CONTEST_DURATION_SECONDS);
+        return;
+      }
 
-    const timer = setInterval(() => {
-      const rem = calcRemaining();
-      setTimeLeft(rem);
-      if (rem <= 0) {
-        clearInterval(timer);
+      // If Participant: load active session remaining seconds from sessionStorage
+      const userKey = user?.id ? `_${user.id}` : '';
+      const savedTime = sessionStorage.getItem(`platform_session_time${userKey}`);
+      let remaining = savedTime !== null ? parseInt(savedTime, 10) : CONTEST_DURATION_SECONDS;
+      if (isNaN(remaining) || remaining < 0) remaining = CONTEST_DURATION_SECONDS;
+
+      setTimeLeft(remaining);
+      if (remaining <= 0) {
         setIsExpired(true);
       }
+
+      const savedViolations = parseInt(sessionStorage.getItem(`platform_tab_violations${userKey}`) || '0', 10);
+      setViolations(savedViolations);
+      if (savedViolations >= 3) {
+        setIsLocked(true);
+      }
+    }
+
+    initUserAndSession();
+  }, []);
+
+  // 2. Active Coding Session Countdown: ONLY ticks while on this page, NEVER in the background
+  useEffect(() => {
+    // Only countdown if participant is logged in and active in this coding session
+    if (!currentUser || currentUser.role !== 'participant' || isLocked || isExpired) {
+      return;
+    }
+
+    const userKey = currentUser?.id ? `_${currentUser.id}` : '';
+
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setIsExpired(true);
+          sessionStorage.setItem(`platform_session_time${userKey}`, '0');
+          return 0;
+        }
+        const next = prev - 1;
+        sessionStorage.setItem(`platform_session_time${userKey}`, next.toString());
+        return next;
+      });
     }, 1000);
 
     return () => clearInterval(timer);
-  }, []);
-
-  // 2. Initialize Violation Strikes from Session
-  useEffect(() => {
-    const savedViolations = parseInt(sessionStorage.getItem('platform_tab_violations') || '0', 10);
-    setViolations(savedViolations);
-    if (savedViolations >= 3) {
-      setIsLocked(true);
-    }
-  }, []);
+  }, [currentUser, isLocked, isExpired]);
 
   // 3. Initial Load of Problem & Saved Draft from Supabase
   useEffect(() => {
@@ -188,8 +225,10 @@ export default function ProblemEditorPage({ params }) {
     };
   }, [slug]);
 
-  // 5. Anti-Cheat: Strictly Block Copy, Paste & Cut
+  // 5. Anti-Cheat: Strictly Block Copy, Paste & Cut for Participants in Active Coding Session
   useEffect(() => {
+    if (!currentUser || currentUser.role !== 'participant') return;
+
     const handlePaste = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -234,15 +273,19 @@ export default function ProblemEditorPage({ params }) {
       window.removeEventListener('cut', handleCopyCut, true);
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, []);
+  }, [currentUser]);
 
-  // 6. Anti-Cheat: Tab Switching & Window Blur Detection
+  // 6. Anti-Cheat: Tab Switching ONLY for Participants inside active coding session
   useEffect(() => {
+    if (!currentUser || currentUser.role !== 'participant') return;
+
+    const userKey = currentUser?.id ? `_${currentUser.id}` : '';
+
     const handleVisibilityChange = () => {
       if (document.hidden && !isLockedRef.current && !isExpiredRef.current) {
         setViolations(prev => {
           const nextCount = prev + 1;
-          sessionStorage.setItem('platform_tab_violations', nextCount.toString());
+          sessionStorage.setItem(`platform_tab_violations${userKey}`, nextCount.toString());
           setShowViolationModal(true);
 
           if (nextCount >= 3) {
@@ -257,7 +300,7 @@ export default function ProblemEditorPage({ params }) {
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, []);
+  }, [currentUser, handleAutoSubmit]);
 
   // 7. Warn before closing or navigating away if unsaved changes exist
   useEffect(() => {
@@ -734,11 +777,11 @@ export default function ProblemEditorPage({ params }) {
             <span 
               className="timer-badge" 
               style={{
-                color: timeLeft < 300 ? '#f87171' : timeLeft < 900 ? '#fbbf24' : '#38bdf8',
-                borderColor: timeLeft < 300 ? '#ef4444' : timeLeft < 900 ? '#f59e0b' : '#0284c7'
+                color: currentUser?.role === 'admin' ? '#a5b4fc' : timeLeft < 300 ? '#f87171' : timeLeft < 900 ? '#fbbf24' : '#38bdf8',
+                borderColor: currentUser?.role === 'admin' ? '#6366f1' : timeLeft < 300 ? '#ef4444' : timeLeft < 900 ? '#f59e0b' : '#0284c7'
               }}
             >
-              ⏳ {formatTime(timeLeft)}
+              ⏳ {currentUser?.role === 'admin' ? 'Admin Preview' : formatTime(timeLeft)}
             </span>
 
             <button 

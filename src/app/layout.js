@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useState, useEffect } from 'react';
 
 export default function RootLayout({ children }) {
-  const [violations, setViolations] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
@@ -44,6 +43,8 @@ export default function RootLayout({ children }) {
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('platform_user');
+      localStorage.removeItem('platform_contest_end_time');
+      sessionStorage.clear();
       window.dispatchEvent(new Event('auth_changed'));
       window.location.href = '/login';
     }
@@ -65,63 +66,13 @@ export default function RootLayout({ children }) {
   };
 
   useEffect(() => {
-    // 1. BroadcastChannel for Multi-Tab sync
-    let channel;
-    try {
-      channel = new BroadcastChannel('exam_integrity_channel');
-      channel.onmessage = (event) => {
-        if (event.data?.type === 'VIOLATION') {
-          setViolations(event.data.count);
-          addToast(`Violation detected across tabs (${event.data.reason})`, 'error');
-        }
-      };
-    } catch (e) {}
-
-    const broadcastViolation = (reason) => {
-      setViolations(prev => {
-        const next = prev + 1;
-        if (channel) {
-          channel.postMessage({ type: 'VIOLATION', count: next, reason });
-        }
-        return next;
-      });
-      addToast(reason, 'error');
-    };
-
-    // 2. Anti-cheat listeners
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        broadcastViolation('Tab switching or window minimized');
-      }
-    };
-
-    const handleContextMenu = (e) => {
-      e.preventDefault();
-      broadcastViolation('Right-click context menu is restricted');
-    };
-
-    const handleCopyPaste = (e) => {
-      // Prevent unauthorized copy/paste
-      if (e.type === 'paste') {
-        broadcastViolation('External paste detected');
-      }
-    };
-
     const handleFullscreenChange = () => {
       setIsFullscreen(Boolean(document.fullscreenElement));
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('contextmenu', handleContextMenu);
-    document.addEventListener('paste', handleCopyPaste);
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('contextmenu', handleContextMenu);
-      document.removeEventListener('paste', handleCopyPaste);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      if (channel) channel.close();
     };
   }, []);
 
@@ -194,12 +145,6 @@ export default function RootLayout({ children }) {
                     🚪 Logout
                   </button>
                 </div>
-
-                {violations > 0 && (
-                  <span className="violations-badge">
-                    ⚠️ Violations: {violations}
-                  </span>
-                )}
 
                 <button onClick={toggleFullscreen} className="nav-btn" style={{ fontSize: '0.8rem' }}>
                   {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}

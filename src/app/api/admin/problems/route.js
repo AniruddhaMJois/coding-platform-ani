@@ -5,7 +5,22 @@ import { broadcastEvent } from '@/lib/realtime';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET() {
+function isAdmin(request) {
+  try {
+    const cookie = request.cookies.get('platform_auth');
+    if (!cookie?.value) return false;
+    const user = JSON.parse(cookie.value);
+    return user && user.role === 'admin';
+  } catch (e) {
+    return false;
+  }
+}
+
+export async function GET(request) {
+  if (!isAdmin(request)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 403 });
+  }
+
   try {
     const problems = await prisma.problem.findMany({
       include: {
@@ -27,6 +42,10 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  if (!isAdmin(request)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { title, slug, description, difficulty, constraints, sampleInput, sampleOutput, templates, testCases } = body;
@@ -75,6 +94,10 @@ export async function POST(request) {
 }
 
 export async function DELETE(request) {
+  if (!isAdmin(request)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 403 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

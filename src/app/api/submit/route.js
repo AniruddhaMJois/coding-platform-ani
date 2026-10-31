@@ -65,6 +65,17 @@ export async function POST(request) {
       }
     });
 
+    const sanitizedResults = results.map((r, idx) => ({
+      testIndex: idx + 1,
+      passed: r.passed,
+      timeMs: r.timeMs,
+      isHidden: Boolean(r.isHidden),
+      input: r.isHidden ? null : r.input,
+      expected: r.isHidden ? null : r.expected,
+      stdout: r.isHidden ? null : r.stdout,
+      stderr: r.isHidden ? (r.passed ? null : 'Evaluation failed on hidden test case.') : r.stderr
+    }));
+
     return NextResponse.json({
       ok: true,
       submissionId: submission.id,
@@ -72,7 +83,7 @@ export async function POST(request) {
       status,
       passedTests: passedCount,
       totalTests: totalCount,
-      results
+      results: sanitizedResults
     });
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

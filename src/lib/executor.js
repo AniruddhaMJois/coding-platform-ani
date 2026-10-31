@@ -441,6 +441,8 @@ async function executeSubmission({ language, code, tests = [], timeLimitMs = 200
       }
     }
 
+    const isHidden = Boolean(test.isHidden);
+
     if (execRes.compileError) {
       results.push({
         passed: false,
@@ -449,7 +451,9 @@ async function executeSubmission({ language, code, tests = [], timeLimitMs = 200
         compileError: execRes.compileError,
         exitCode: execRes.code,
         timeMs: execRes.timeMs,
-        expected: test.expected
+        expected: isHidden ? null : test.expected,
+        input: isHidden ? null : (test.input || stdin),
+        isHidden
       });
       break; // Abort remaining tests on compilation error
     }
@@ -460,12 +464,13 @@ async function executeSubmission({ language, code, tests = [], timeLimitMs = 200
 
     results.push({
       passed,
-      stdout: execRes.stdout.trim(),
-      stderr: execRes.stderr.trim(),
+      stdout: isHidden ? '[Hidden Evaluation Case]' : execRes.stdout.trim(),
+      stderr: isHidden ? (execRes.stderr ? 'Runtime exception on hidden case' : '') : execRes.stderr.trim(),
       exitCode: execRes.code,
       timeMs: execRes.timeMs,
-      expected: test.expected,
-      input: test.input || stdin
+      expected: isHidden ? null : test.expected,
+      input: isHidden ? null : (test.input || stdin),
+      isHidden
     });
   }
 

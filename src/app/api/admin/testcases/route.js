@@ -5,8 +5,23 @@ import { broadcastEvent } from '@/lib/realtime';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+function isAdmin(request) {
+  try {
+    const cookie = request.cookies.get('platform_auth');
+    if (!cookie?.value) return false;
+    const user = JSON.parse(cookie.value);
+    return user && user.role === 'admin';
+  } catch (e) {
+    return false;
+  }
+}
+
 // POST: Add or bulk upload test cases to a problem
 export async function POST(request) {
+  if (!isAdmin(request)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 403 });
+  }
+
   try {
     const body = await request.json();
     const { problemId, testCases, input, stdin, expected, isHidden } = body;
@@ -83,6 +98,10 @@ export async function POST(request) {
 
 // DELETE: Remove a test case
 export async function DELETE(request) {
+  if (!isAdmin(request)) {
+    return NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 403 });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');

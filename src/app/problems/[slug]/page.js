@@ -824,21 +824,29 @@ export default function ProblemEditorPage({ params }) {
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
                           <span style={{ color: t.passed ? '#34d399' : '#f87171' }}>
-                            Test Case #{idx + 1}: {t.passed ? 'Passed ✓' : 'Failed ✗'}
+                            {t.isHidden ? `🔒 Hidden Evaluation Case #${idx + 1}` : `Test Case #${idx + 1}`}: {t.passed ? 'Passed ✓' : 'Failed ✗'}
                           </span>
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                             {t.timeMs !== undefined ? `${t.timeMs}ms` : ''}
                           </span>
                         </div>
-                        {t.stderr && (
-                          <div style={{ color: '#f87171', marginTop: '0.35rem' }}>
-                            {t.stderr}
+                        {t.isHidden ? (
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem', fontStyle: 'italic' }}>
+                            🔒 Evaluation test case — test inputs, expected values, and execution logs are hidden.
                           </div>
-                        )}
-                        {!t.passed && t.expected && (
-                          <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-                            Expected: <code>{t.expected}</code> | Got: <code>{t.stdout || 'None'}</code>
-                          </div>
+                        ) : (
+                          <>
+                            {t.stderr && (
+                              <div style={{ color: '#f87171', marginTop: '0.35rem' }}>
+                                {t.stderr}
+                              </div>
+                            )}
+                            {!t.passed && t.expected && (
+                              <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
+                                Expected: <code>{t.expected}</code> | Got: <code>{t.stdout || 'None'}</code>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
                     ))}

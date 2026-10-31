@@ -241,8 +241,8 @@ export default function ProblemEditorPage({ params }) {
     };
   }, [slug]);
 
-  // 5. Anti-Cheat: Copy/Paste Interception (Set ALLOW_COPY_PASTE to true/false)
-  const ALLOW_COPY_PASTE = true; // Set to false when re-enabling anti-cheat enforcement
+  // 5. Anti-Cheat: Strictly Block Copy, Paste & Cut for Participants in Active Coding Session
+  const ALLOW_COPY_PASTE = false; // Strictly enforce anti-cheat protection
 
   useEffect(() => {
     if (ALLOW_COPY_PASTE) return; // Copy & paste allowed for testing

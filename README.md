@@ -95,7 +95,23 @@ To solve these limitations, the platform was re-architected into a **unified, se
    * **Zero Pre-existing Code**: Editor opens completely empty (`''`) unless an explicit saved draft exists.
    * **Copy & Paste Strictly Blocked**: Context menus disabled, clipboard events (`paste`, `copy`, `cut`) intercepted, keyboard shortcuts (`Ctrl+C`, `Ctrl+V`, `Cmd+C`, `Cmd+V`, `Ctrl+X`) blocked with live warning toasts.
    * **3-Strike Tab Switch Detection**: Document visibility loss triggers persistent violation warnings. The 3rd strike locks the editor and auto-submits the assessment.
-   * **Persistent Contest Countdown Timer**: Stored in browser storage (`platform_contest_end_time`) to prevent page reload timer resets. Auto-submits when time expires.
+   * **Active Session Countdown Timer**: Counts down exclusively while the participant is engaged in the problem editor (never depletes in the background).
+   * **One-Time Problem Solving Lock**: Once a problem is evaluated as `Accepted` (100% score), it is permanently locked for that participant (`Solved ✓`), preventing re-attempts while other participants maintain an isolated fresh state.
+   * **Unified Submissions & In-Progress Drafts (`/submissions`)**: Displays evaluated submissions alongside active in-progress drafts, complete with status tags (`Accepted`, `In-Progress Draft`, `Wrong Answer`, `Time Limit Exceeded`), a modal code inspector, and direct `Continue Solving →` buttons.
+
+---
+
+## 📚 Seeded Problems (Simple & Accessible)
+
+The platform is pre-seeded with beginner-friendly arithmetic and logic challenges:
+
+| Problem | Slug | Description | Function / Standard I/O |
+| :--- | :--- | :--- | :--- |
+| **Add Two Numbers** | `add-two-numbers` | Given integers $a$ and $b$, return $a + b$ | `add(a, b)` or `a + b` |
+| **Multiply Two Numbers** | `multiply-two-numbers` | Given integers $a$ and $b$, return $a \times b$ | `multiply(a, b)` or `a * b` |
+| **Even or Odd** | `even-or-odd` | Return `"Even"` or `"Odd"` for integer $n$ | `evenOrOdd(n)` or logic |
+| **Maximum of Two Numbers** | `maximum-of-two-numbers` | Return the larger of $a$ and $b$ | `findMax(a, b)` or `max(a, b)` |
+| **Square of a Number** | `square-of-number` | Return $n^2$ | `square(n)` or `n * n` |
 
 ---
 

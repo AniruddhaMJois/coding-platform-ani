@@ -241,8 +241,11 @@ export default function ProblemEditorPage({ params }) {
     };
   }, [slug]);
 
-  // 5. Anti-Cheat: Strictly Block Copy, Paste & Cut for Participants in Active Coding Session
+  // 5. Anti-Cheat: Copy/Paste Interception (Set ALLOW_COPY_PASTE to true/false)
+  const ALLOW_COPY_PASTE = true; // Set to false when re-enabling anti-cheat enforcement
+
   useEffect(() => {
+    if (ALLOW_COPY_PASTE) return; // Copy & paste allowed for testing
     if (!currentUser || currentUser.role !== 'participant') return;
 
     const handlePaste = (e) => {
@@ -914,13 +917,15 @@ export default function ProblemEditorPage({ params }) {
           </div>
         </div>
 
-        {/* Monaco Editor with Copy-Paste & Right-Click Disabled */}
+        {/* Monaco Editor (Copy-Paste & Context Menu allowed when ALLOW_COPY_PASTE is true) */}
         <div 
           style={{ flex: 1, minHeight: '300px' }}
           onContextMenu={(e) => {
-            e.preventDefault();
-            setAntiCheatToast('🚫 Context menu is disabled to prevent copy/paste.');
-            setTimeout(() => setAntiCheatToast(null), 3000);
+            if (!ALLOW_COPY_PASTE) {
+              e.preventDefault();
+              setAntiCheatToast('🚫 Context menu is disabled to prevent copy/paste.');
+              setTimeout(() => setAntiCheatToast(null), 3000);
+            }
           }}
         >
           <Editor
@@ -943,7 +948,7 @@ export default function ProblemEditorPage({ params }) {
               scrollBeyondLastLine: false,
               automaticLayout: true,
               tabSize: 2,
-              contextmenu: false, // Disables right-click context menu
+              contextmenu: ALLOW_COPY_PASTE, // Enabled when ALLOW_COPY_PASTE is true
               readOnly: isLocked || isExpired || isSolved
             }}
           />

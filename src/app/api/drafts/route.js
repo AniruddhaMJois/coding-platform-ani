@@ -42,6 +42,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'problemId and language required' }, { status: 400 });
     }
 
+    const cleanCode = typeof code === 'string' ? code.trimEnd() : '';
+
+    // Enforce 64KB max code draft size to strictly prevent database bloat
+    if (cleanCode.length > 65536) {
+      return NextResponse.json({ error: 'Code exceeds maximum draft size (64KB)' }, { status: 400 });
+    }
+
     // Check if draft already exists
     const existing = await prisma.codeDraft.findFirst({
       where: {
@@ -51,12 +58,21 @@ export async function POST(request) {
       }
     });
 
+    // If existing code is identical, return immediately without touching Postgres
+    if (existing && existing.code === cleanCode) {
+      return NextResponse.json({
+        ok: true,
+        message: 'Draft is already up to date',
+        savedAt: existing.updatedAt
+      });
+    }
+
     let draft;
     if (existing) {
       draft = await prisma.codeDraft.update({
         where: { id: existing.id },
         data: {
-          code: code || '',
+          code: cleanCode,
           updatedAt: new Date()
         }
       });
@@ -65,7 +81,7 @@ export async function POST(request) {
         data: {
           problemId: Number(problemId),
           language,
-          code: code || '',
+          code: cleanCode,
           userId: userId ? Number(userId) : null
         }
       });

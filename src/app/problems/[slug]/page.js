@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import Editor from '@monaco-editor/react';
+
+const CONTEST_DURATION_SECONDS = 3600; // 1 hour
 
 export default function ProblemEditorPage({ params }) {
   const { slug } = params;
@@ -20,14 +22,67 @@ export default function ProblemEditorPage({ params }) {
   const [saving, setSaving] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(3600); // 1 hour
   const [liveNotice, setLiveNotice] = useState(null);
 
-  // Keep a ref to current language and problem id for background sync
+  // Anti-Cheat & Timer states
+  const [timeLeft, setTimeLeft] = useState(CONTEST_DURATION_SECONDS);
+  const [isExpired, setIsExpired] = useState(false);
+  const [violations, setViolations] = useState(0);
+  const [showViolationModal, setShowViolationModal] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
+  const [antiCheatToast, setAntiCheatToast] = useState(null);
+
+  // Keep a ref to latest code & language for auto-submit
   const currentLangRef = useRef(language);
   currentLangRef.current = language;
+  const currentCodeRef = useRef(code);
+  currentCodeRef.current = code;
+  const isLockedRef = useRef(isLocked);
+  isLockedRef.current = isLocked;
+  const isExpiredRef = useRef(isExpired);
+  isExpiredRef.current = isExpired;
 
-  // 1. Initial Load
+  // 1. Initialize Persistent Timer from Storage (Cannot be reset by page refresh)
+  useEffect(() => {
+    let endTime = localStorage.getItem('platform_contest_end_time');
+    if (!endTime) {
+      endTime = (Date.now() + CONTEST_DURATION_SECONDS * 1000).toString();
+      localStorage.setItem('platform_contest_end_time', endTime);
+    }
+
+    const calcRemaining = () => {
+      const remaining = Math.floor((parseInt(endTime, 10) - Date.now()) / 1000);
+      return remaining > 0 ? remaining : 0;
+    };
+
+    const initial = calcRemaining();
+    setTimeLeft(initial);
+    if (initial <= 0) {
+      setIsExpired(true);
+    }
+
+    const timer = setInterval(() => {
+      const rem = calcRemaining();
+      setTimeLeft(rem);
+      if (rem <= 0) {
+        clearInterval(timer);
+        setIsExpired(true);
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  // 2. Initialize Violation Strikes from Session
+  useEffect(() => {
+    const savedViolations = parseInt(sessionStorage.getItem('platform_tab_violations') || '0', 10);
+    setViolations(savedViolations);
+    if (savedViolations >= 3) {
+      setIsLocked(true);
+    }
+  }, []);
+
+  // 3. Initial Load of Problem & Saved Draft from Supabase
   useEffect(() => {
     async function loadData() {
       try {
@@ -38,7 +93,7 @@ export default function ProblemEditorPage({ params }) {
           const current = data.problems.find(p => p.slug === slug) || data.problems[0];
           setProblem(current);
 
-          // Check if user has an explicitly saved draft in DB for this problem & language
+          // Fetch explicit draft from database
           const draftRes = await fetch(`/api/drafts?problemId=${current.id}&language=${currentLangRef.current}`);
           const draftData = await draftRes.json();
 
@@ -61,7 +116,7 @@ export default function ProblemEditorPage({ params }) {
     loadData();
   }, [slug]);
 
-  // 2. Real-time background sync for test cases and problem data
+  // 4. Real-time background sync for test cases and problem data
   const refreshProblemData = async (noticeText = null) => {
     try {
       const res = await fetch(`/api/problems?slug=${slug}`, { cache: 'no-store' });
@@ -87,7 +142,7 @@ export default function ProblemEditorPage({ params }) {
   };
 
   useEffect(() => {
-    // A. Listen via Server-Sent Events (cross-device & cross-browser real-time)
+    // A. Server-Sent Events (SSE)
     let eventSource;
     try {
       eventSource = new EventSource('/api/events');
@@ -108,7 +163,7 @@ export default function ProblemEditorPage({ params }) {
       };
     } catch (e) {}
 
-    // B. Listen via BroadcastChannel (same-browser instant cross-tab sync)
+    // B. BroadcastChannel
     let bc;
     try {
       bc = new BroadcastChannel('platform_cms_channel');
@@ -121,10 +176,10 @@ export default function ProblemEditorPage({ params }) {
       };
     } catch (e) {}
 
-    // C. Lightweight fallback polling every 3.5 seconds
+    // C. Fallback Polling every 4 seconds
     const interval = setInterval(() => {
       refreshProblemData(null);
-    }, 3500);
+    }, 4000);
 
     return () => {
       if (eventSource) eventSource.close();
@@ -133,7 +188,118 @@ export default function ProblemEditorPage({ params }) {
     };
   }, [slug]);
 
-  // 3. Language switch handler (loads explicitly saved draft or template)
+  // 5. Anti-Cheat: Strictly Block Copy, Paste & Cut
+  useEffect(() => {
+    const handlePaste = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setAntiCheatToast('🚫 Copy & Paste is strictly disabled during this contest!');
+      setTimeout(() => setAntiCheatToast(null), 3500);
+    };
+
+    const handleCopyCut = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setAntiCheatToast('🚫 Copying code out of the contest editor is disabled!');
+      setTimeout(() => setAntiCheatToast(null), 3500);
+    };
+
+    const handleKeyDown = (e) => {
+      // Intercept Ctrl+V / Cmd+V / Ctrl+C / Cmd+C / Ctrl+X / Cmd+X
+      const isCmdOrCtrl = e.ctrlKey || e.metaKey;
+      if (isCmdOrCtrl && (e.key === 'v' || e.key === 'V')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setAntiCheatToast('🚫 Pasting (Ctrl+V / Cmd+V) is blocked by the anti-cheat system!');
+        setTimeout(() => setAntiCheatToast(null), 3500);
+      } else if (isCmdOrCtrl && (e.key === 'c' || e.key === 'C')) {
+        e.preventDefault();
+        e.stopPropagation();
+        setAntiCheatToast('🚫 Copying (Ctrl+C / Cmd+C) is blocked by the anti-cheat system!');
+        setTimeout(() => setAntiCheatToast(null), 3500);
+      } else if (isCmdOrCtrl && (e.key === 'x' || e.key === 'X')) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    window.addEventListener('paste', handlePaste, true);
+    window.addEventListener('copy', handleCopyCut, true);
+    window.addEventListener('cut', handleCopyCut, true);
+    window.addEventListener('keydown', handleKeyDown, true);
+
+    return () => {
+      window.removeEventListener('paste', handlePaste, true);
+      window.removeEventListener('copy', handleCopyCut, true);
+      window.removeEventListener('cut', handleCopyCut, true);
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, []);
+
+  // 6. Anti-Cheat: Tab Switching & Window Blur Detection
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && !isLockedRef.current && !isExpiredRef.current) {
+        setViolations(prev => {
+          const nextCount = prev + 1;
+          sessionStorage.setItem('platform_tab_violations', nextCount.toString());
+          setShowViolationModal(true);
+
+          if (nextCount >= 3) {
+            setIsLocked(true);
+            // Auto submit on 3rd violation strike
+            handleAutoSubmit('Disqualified: 3 tab switch violations detected.');
+          }
+          return nextCount;
+        });
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
+  // 7. Warn before closing or navigating away if unsaved changes exist
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = 'You have unsaved code. Please click Save Draft before leaving.';
+        return e.returnValue;
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  // 8. Auto-submit handler (called on Timeout or 3rd Strike)
+  const handleAutoSubmit = useCallback(async (reason) => {
+    if (!problem) return;
+    try {
+      await fetch('/api/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          problemId: problem.id,
+          slug: problem.slug,
+          language: currentLangRef.current,
+          code: currentCodeRef.current
+        })
+      });
+      setOutput(`Auto-submitted: ${reason}`);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [problem]);
+
+  // Handle Timeout trigger
+  useEffect(() => {
+    if (isExpired && !isLocked) {
+      handleAutoSubmit('Contest time has expired.');
+    }
+  }, [isExpired, isLocked, handleAutoSubmit]);
+
+  // 9. Language switch handler (loads explicitly saved draft or template)
   const handleLanguageChange = async (newLang) => {
     setLanguage(newLang);
     if (!problem) return;
@@ -156,15 +322,16 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 4. Code change handler - flags unsaved changes
+  // 10. Code change handler - flags unsaved changes
   const handleCodeChange = (newCode) => {
+    if (isLocked || isExpired) return;
     setCode(newCode || '');
     setHasUnsavedChanges(true);
   };
 
-  // 5. Explicit Save Code Handler (Saves to Database only on click)
+  // 11. Explicit Save Code Handler (Efficient DB persistence)
   const handleSaveCode = async () => {
-    if (!problem) return;
+    if (!problem || isLocked || isExpired) return;
     setSaving(true);
 
     try {
@@ -183,7 +350,7 @@ export default function ProblemEditorPage({ params }) {
         setHasUnsavedChanges(false);
         const timeStr = new Date(data.savedAt).toLocaleTimeString();
         setLastSavedTime(timeStr);
-        setOutput(`Code draft saved successfully at ${timeStr}`);
+        setOutput(`Code draft saved successfully to database at ${timeStr}`);
       } else {
         alert(`Failed to save draft: ${data.error}`);
       }
@@ -194,26 +361,12 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 6. Timer countdown
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-  };
-
-  // 7. Run Code (Public sample test cases only)
+  // 12. Run Code (Public sample test cases only)
   const handleRunCode = async () => {
-    if (!problem) return;
+    if (!problem || isLocked || isExpired) return;
     setRunning(true);
     setActiveTab('tests');
-    setOutput('Running public test cases...');
+    setOutput('Running public test cases in isolated sandbox...');
 
     try {
       const res = await fetch('/api/run', {
@@ -243,12 +396,12 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
-  // 8. Submit Code (Full hidden test evaluation)
+  // 13. Submit Code (Full hidden test evaluation)
   const handleSubmitCode = async () => {
-    if (!problem) return;
+    if (!problem || isLocked || isExpired) return;
     setSubmitting(true);
     setActiveTab('tests');
-    setOutput('Grading submission against full test suite...');
+    setOutput('Grading submission against full test suite in cloud sandbox...');
 
     try {
       const res = await fetch('/api/submit', {
@@ -278,6 +431,12 @@ export default function ProblemEditorPage({ params }) {
     }
   };
 
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
   if (loading || !problem) {
     return (
       <div className="container" style={{ textAlign: 'center', padding: '4rem' }}>
@@ -292,6 +451,112 @@ export default function ProblemEditorPage({ params }) {
 
   return (
     <div className="editor-layout">
+      {/* Anti-Cheat Toast Alert */}
+      {antiCheatToast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'linear-gradient(90deg, #b91c1c, #991b1b)',
+          color: '#fee2e2',
+          padding: '0.75rem 1.5rem',
+          borderRadius: '8px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          zIndex: 9999,
+          fontWeight: 600,
+          fontSize: '0.9rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          border: '1px solid #f87171'
+        }}>
+          <span>{antiCheatToast}</span>
+        </div>
+      )}
+
+      {/* Tab Switch Warning / Disqualification Modal */}
+      {showViolationModal && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '1rem'
+        }}>
+          <div className="card" style={{
+            maxWidth: '520px',
+            width: '100%',
+            textAlign: 'center',
+            padding: '2rem',
+            background: '#18181b',
+            border: `2px solid ${violations >= 3 ? '#ef4444' : '#f59e0b'}`
+          }}>
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>
+              {violations >= 3 ? '🚨' : '⚠️'}
+            </div>
+            <h2 style={{ color: violations >= 3 ? '#ef4444' : '#f59e0b', marginBottom: '0.75rem' }}>
+              {violations >= 3 ? 'Contest Disqualified' : `Tab Switch Warning (${violations}/3)`}
+            </h2>
+            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: '1.5rem', fontSize: '0.95rem' }}>
+              {violations >= 3 ? (
+                'You have exceeded the maximum of 3 tab switch violations. Your editor has been locked and your current code has been automatically submitted.'
+              ) : (
+                `Leaving the contest window or switching tabs is recorded as an anti-cheat violation. You have ${3 - violations} strike(s) remaining before automatic disqualification.`
+              )}
+            </p>
+            {violations < 3 ? (
+              <button
+                onClick={() => setShowViolationModal(false)}
+                className="nav-btn primary"
+                style={{ padding: '0.75rem 1.75rem', fontSize: '0.95rem' }}
+              >
+                I Understand & Resume Contest
+              </button>
+            ) : (
+              <div style={{ color: '#ef4444', fontWeight: 600 }}>
+                Editor Locked &bull; Auto-Submitted
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Time Expired Modal */}
+      {isExpired && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.85)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 10000,
+          padding: '1rem'
+        }}>
+          <div className="card" style={{
+            maxWidth: '480px',
+            width: '100%',
+            textAlign: 'center',
+            padding: '2rem',
+            background: '#18181b',
+            border: '2px solid #ef4444'
+          }}>
+            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>⌛</div>
+            <h2 style={{ color: '#ef4444', marginBottom: '0.75rem' }}>Time is Up!</h2>
+            <p style={{ color: '#cbd5e1', lineHeight: '1.6', marginBottom: '1.5rem' }}>
+              The contest duration has expired. Your current code solution has been submitted to the judge.
+            </p>
+            <Link href="/submissions" className="nav-btn primary" style={{ padding: '0.75rem 1.5rem' }}>
+              View Submission Results
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Left Pane: Problem Description & Live Test Cases */}
       <div className="problem-panel">
         {/* Real-time Notification Banner */}
@@ -308,8 +573,7 @@ export default function ProblemEditorPage({ params }) {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)',
-              animation: 'pulse 2s infinite'
+              boxShadow: '0 4px 12px rgba(99, 102, 241, 0.25)'
             }}
           >
             <span>{liveNotice}</span>
@@ -320,7 +584,12 @@ export default function ProblemEditorPage({ params }) {
           <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             Problem {currentIndex + 1} of {allProblems.length}
           </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {violations > 0 && (
+              <span style={{ fontSize: '0.75rem', color: '#f59e0b', background: 'rgba(245, 158, 11, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #f59e0b' }}>
+                ⚠️ {violations}/3 Strikes
+              </span>
+            )}
             <span style={{ fontSize: '0.75rem', color: '#34d399', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }}></span>
               Live Sync
@@ -424,7 +693,7 @@ export default function ProblemEditorPage({ params }) {
               </button>
             )}
 
-            <select value={language} onChange={(e) => handleLanguageChange(e.target.value)}>
+            <select value={language} onChange={(e) => handleLanguageChange(e.target.value)} disabled={isLocked || isExpired}>
               <option value="javascript">JavaScript (Node.js)</option>
               <option value="python">Python 3</option>
               <option value="c">C (GCC)</option>
@@ -435,7 +704,7 @@ export default function ProblemEditorPage({ params }) {
             {/* Explicit Save Button & Status */}
             <button 
               onClick={handleSaveCode}
-              disabled={saving}
+              disabled={saving || isLocked || isExpired}
               className="nav-btn"
               style={{
                 borderColor: hasUnsavedChanges ? '#f59e0b' : '#334155',
@@ -462,13 +731,19 @@ export default function ProblemEditorPage({ params }) {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span className="timer-badge">
+            <span 
+              className="timer-badge" 
+              style={{
+                color: timeLeft < 300 ? '#f87171' : timeLeft < 900 ? '#fbbf24' : '#38bdf8',
+                borderColor: timeLeft < 300 ? '#ef4444' : timeLeft < 900 ? '#f59e0b' : '#0284c7'
+              }}
+            >
               ⏳ {formatTime(timeLeft)}
             </span>
 
             <button 
               onClick={handleRunCode} 
-              disabled={running || submitting} 
+              disabled={running || submitting || isLocked || isExpired} 
               className="btn-run"
             >
               {running ? 'Running...' : 'Run Code'}
@@ -476,7 +751,7 @@ export default function ProblemEditorPage({ params }) {
 
             <button 
               onClick={handleSubmitCode} 
-              disabled={running || submitting} 
+              disabled={running || submitting || isLocked || isExpired} 
               className="btn-submit"
             >
               {submitting ? 'Submitting...' : 'Submit'}
@@ -484,8 +759,15 @@ export default function ProblemEditorPage({ params }) {
           </div>
         </div>
 
-        {/* Monaco Editor */}
-        <div style={{ flex: 1, minHeight: '300px' }}>
+        {/* Monaco Editor with Copy-Paste & Right-Click Disabled */}
+        <div 
+          style={{ flex: 1, minHeight: '300px' }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setAntiCheatToast('🚫 Context menu is disabled to prevent copy/paste.');
+            setTimeout(() => setAntiCheatToast(null), 3000);
+          }}
+        >
           <Editor
             height="100%"
             language={language === 'c' || language === 'cpp' ? 'cpp' : language}
@@ -497,7 +779,9 @@ export default function ProblemEditorPage({ params }) {
               minimap: { enabled: false },
               scrollBeyondLastLine: false,
               automaticLayout: true,
-              tabSize: 2
+              tabSize: 2,
+              contextmenu: false, // Disables right-click context menu
+              readOnly: isLocked || isExpired
             }}
           />
         </div>

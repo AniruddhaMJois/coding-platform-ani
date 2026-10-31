@@ -350,6 +350,64 @@ async function runNative(language, code, stdin, timeLimitMs) {
   }
 }
 
+// Judge0 CE Language IDs (open standard sandbox)
+const JUDGE0_LANGUAGE_IDS = {
+  python: 92, // Python 3.11.2
+  javascript: 93, // Node.js 18.15.0
+  js: 93,
+  c: 103, // GCC 14.1.0
+  cpp: 105, // G++ 14.1.0
+  'c++': 105,
+  java: 91 // JDK 17.0.6
+};
+
+// Execute code in remote isolated Linux sandbox (works on Vercel, any cloud, and any OS)
+async function runJudge0(language, code, stdin, timeLimitMs = 2000) {
+  const langKey = (language || '').toLowerCase();
+  const langId = JUDGE0_LANGUAGE_IDS[langKey];
+  if (!langId) {
+    throw new Error(`Unsupported language for sandbox: ${language}`);
+  }
+
+  const endpoint = process.env.JUDGE0_URL || 'https://ce.judge0.com';
+  const cpuTimeLimit = Math.max(1, Math.min(10, Math.ceil(timeLimitMs / 1000)));
+
+  const res = await fetch(`${endpoint}/submissions?base64_encoded=false&wait=true`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(process.env.JUDGE0_API_KEY ? { 'X-RapidAPI-Key': process.env.JUDGE0_API_KEY } : {})
+    },
+    body: JSON.stringify({
+      source_code: code,
+      language_id: langId,
+      stdin: stdin || '',
+      cpu_time_limit: cpuTimeLimit,
+      memory_limit: 128000 // 128 MB max memory
+    })
+  });
+
+  if (!res.ok) {
+    throw new Error(`Judge0 API error: ${res.status} ${res.statusText}`);
+  }
+
+  const data = await res.json();
+  const stdout = data.stdout || '';
+  const stderr = data.stderr || data.compile_output || '';
+  const isCompileError = data.status?.id === 6; // Compilation Error
+  const isTLE = data.status?.id === 5; // Time Limit Exceeded
+
+  return {
+    code: data.status?.id === 3 ? 0 : (data.exit_code ?? 1),
+    stdout,
+    stderr: isTLE ? 'Time Limit Exceeded (execution timed out)' : stderr,
+    compileError: isCompileError ? stderr : null,
+    timeMs: data.time ? Math.round(parseFloat(data.time) * 1000) : 0,
+    memoryKb: data.memory,
+    isTLE
+  };
+}
+
 // Normalize output for matching
 function normalize(str) {
   if (str === null || str === undefined) return '';
@@ -370,8 +428,18 @@ async function executeSubmission({ language, code, tests = [], timeLimitMs = 200
     const test = tests[i];
     const stdin = test.stdin || (typeof test.input === 'string' ? test.input : JSON.stringify(test.input)) || '';
     
-    // Execute via Native Fallback (or Docker when configured)
-    const execRes = await runNative(language, wrappedCode, stdin, timeLimitMs);
+    let execRes;
+    // Primary: Run in cloud sandbox (Vercel-ready, 100% OS-independent, safe from malicious scripts)
+    try {
+      execRes = await runJudge0(language, wrappedCode, stdin, timeLimitMs);
+    } catch (sandboxErr) {
+      // Fallback: If offline or remote sandbox fails, run locally via native process if available
+      try {
+        execRes = await runNative(language, wrappedCode, stdin, timeLimitMs);
+      } catch (nativeErr) {
+        execRes = { code: 1, stdout: '', stderr: `Execution failed: ${sandboxErr.message}`, timeMs: 0 };
+      }
+    }
 
     if (execRes.compileError) {
       results.push({
@@ -407,5 +475,6 @@ async function executeSubmission({ language, code, tests = [], timeLimitMs = 200
 module.exports = {
   executeSubmission,
   checkDocker,
-  wrapUserCode
+  wrapUserCode,
+  runJudge0
 };

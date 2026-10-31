@@ -118,7 +118,14 @@ ${userCode}
 if __name__ == '__main__':
     raw = sys.stdin.read().strip()
     # Try calling detected function
-    fn = globals().get('${funcName}') or globals().get('two_sum') or globals().get('reverse_string') or globals().get('is_palindrome') or globals().get('fizz_buzz') or globals().get('find_max') or globals().get('solve')
+    fn = (globals().get('${funcName}') or 
+          globals().get('add') or globals().get('add_two_numbers') or 
+          globals().get('multiply') or globals().get('multiply_two_numbers') or 
+          globals().get('even_or_odd') or globals().get('is_even_or_odd') or globals().get('is_even') or 
+          globals().get('find_max') or globals().get('max') or globals().get('maximum_of_two_numbers') or 
+          globals().get('square') or globals().get('square_of_number') or 
+          globals().get('solve') or globals().get('two_sum') or globals().get('reverse_string') or 
+          globals().get('is_palindrome') or globals().get('fizz_buzz'))
     if fn and callable(fn):
         lines = [line.strip() for line in raw.split('\\n') if line.strip()]
         try:
@@ -157,7 +164,11 @@ if __name__ == '__main__':
                 elif arg.startswith('[') and arg.endswith(']'):
                     res = fn(json.loads(arg))
                 elif ' ' in arg and all(x.lstrip('-').isdigit() for x in arg.split()):
-                    res = fn([int(x) for x in arg.split()])
+                    nums = [int(x) for x in arg.split()]
+                    try:
+                        res = fn(*nums)
+                    except TypeError:
+                        res = fn(nums)
                 else:
                     try:
                         res = fn(list(arg))
@@ -190,11 +201,24 @@ ${userCode}
 try {
   const raw = fs.readFileSync(0, 'utf8').trim();
   const fn = (typeof ${funcName || 'undefined'} === 'function') ? ${funcName} :
+    (typeof add === 'function') ? add :
+    (typeof addTwoNumbers === 'function') ? addTwoNumbers :
+    (typeof multiply === 'function') ? multiply :
+    (typeof multiplyTwoNumbers === 'function') ? multiplyTwoNumbers :
+    (typeof evenOrOdd === 'function') ? evenOrOdd :
+    (typeof isEvenOrOdd === 'function') ? isEvenOrOdd :
+    (typeof isEven === 'function') ? isEven :
+    (typeof findMax === 'function') ? findMax :
+    (typeof max === 'function') ? max :
+    (typeof maximumOfTwoNumbers === 'function') ? maximumOfTwoNumbers :
+    (typeof square === 'function') ? square :
+    (typeof squareOfNumber === 'function') ? squareOfNumber :
+    (typeof solve === 'function') ? solve :
+    (typeof solution === 'function') ? solution :
     (typeof twoSum === 'function') ? twoSum :
     (typeof reverseString === 'function') ? reverseString :
     (typeof isPalindrome === 'function') ? isPalindrome :
-    (typeof fizzBuzz === 'function') ? fizzBuzz :
-    (typeof findMax === 'function') ? findMax : null;
+    (typeof fizzBuzz === 'function') ? fizzBuzz : null;
 
   if (fn) {
     const lines = raw.split('\\n').map(l => l.trim()).filter(Boolean);
@@ -223,7 +247,8 @@ try {
       } else if (arg.startsWith('[') && arg.endsWith(']')) {
         res = fn(JSON.parse(arg));
       } else if (arg.includes(' ') && arg.split(' ').every(x => !isNaN(Number(x)))) {
-        res = fn(arg.split(' ').map(Number));
+        const nums = arg.split(' ').map(Number);
+        try { res = fn(...nums); } catch(e) { res = fn(nums); }
       } else {
         try {
           res = fn(arg.split(''));

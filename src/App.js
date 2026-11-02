@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { UnControlled as CodeMirror } from 'react-codemirror2';
+import { Controlled as CodeMirror } from 'react-codemirror2';
 import 'codemirror/lib/codemirror.css';
 import 'codemirror/mode/javascript/javascript';
 import 'codemirror/mode/python/python';
@@ -485,27 +485,42 @@ public:
               </div>
               <div className="code-editor-container">
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+
                   <CodeMirror
                     value={code}
                     options={{
-                      mode: language === 'python' ? 'python' : language === 'javascript' ? 'javascript' : 'clike',
+                      mode:
+                        language === 'python'
+                          ? 'python'
+                          : language === 'java'
+                            ? 'text/x-java'
+                            : language === 'c'
+                              ? 'text/x-csrc'
+                              : language === 'cpp'
+                                ? 'text/x-c++src'
+                                : 'javascript',
                       theme: 'default',
                       lineNumbers: true,
                       readOnly: false,
-                      tabSize: 2,
+                      tabSize: 4,
+                      indentUnit: 4,
                       indentWithTabs: false,
                     }}
-                    onChange={(editor, data, value) => {
+                    onBeforeChange={(editor, data, value) => {
                       setCode(value);
                     }}
                     onKeyDown={(editor, event) => {
-                      if ((event.ctrlKey || event.metaKey) && ['c', 'v', 'x'].includes(event.key.toLowerCase())) {
+                      if (
+                        (event.ctrlKey || event.metaKey) &&
+                        ['c', 'v', 'x'].includes(event.key.toLowerCase())
+                      ) {
                         event.preventDefault();
                         setViolations(prev => prev + 1);
                         alert('Copy-paste disabled!');
                       }
                     }}
                   />
+
                   <div className="output">
                     <h3>Output:</h3>
                     <pre>{output}</pre>
